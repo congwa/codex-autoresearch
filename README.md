@@ -1,6 +1,6 @@
 # codex-autoresearch
 
-一个用于守护 Codex 长任务的 Bash 脚本，避免codex执行一个任务总是自动停止的问题。
+一个用于守护 Codex 长任务的 Bash 脚本，避免codex执行一个长任务总是自动停止的问题。
 
 它的目标很直接：当你希望 Codex 在无人值守时持续推进同一项任务，这个脚本会先发起一次 `codex exec`，之后不断对同一会话执行 `codex exec resume`，直到收到严格的完成协议为止，而不是仅凭一句“我做完了”就停下。
 
