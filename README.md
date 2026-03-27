@@ -71,6 +71,35 @@ codex-autoresearch --help
 用 research skill 处理我们当前聊天刚才讨论的需求。
 ```
 
+### 什么时候用哪一种
+
+如果你只想知道“我现在该用哪一种方式”，直接看这张表：
+
+| 你当前在哪 | 你想干嘛 | 推荐用法 | 例子 |
+| --- | --- | --- | --- |
+| Codex 聊天窗里 | 把刚才聊天直接交给永动机 | `slash` | `/codex-autoresearch` |
+| Codex 聊天窗里 | 用人话触发永动机 | 自然语言 | `用 codex-autoresearch 把我们刚才聊的需求跑成一个永动机任务。` |
+| Codex 聊天窗里 | 按某个仓库 skill 跑 | 显式 skill | `用 research skill 处理我们当前聊天刚才讨论的需求。` |
+| 终端里 | 直接新开任务 | CLI 直接任务 | `codex-autoresearch "修这个问题"` |
+| 终端里 | 继续当前目录最近任务 | CLI resume | `codex-autoresearch session resume --last` |
+| 终端里 | 运行仓库任务配方 | CLI skill | `codex-autoresearch skill run research --set topic=...` |
+| 终端里 | 给外部 agent / 插件提供能力 | MCP | `codex-autoresearch mcp serve` |
+| 终端里 | 兼容旧 `prompt.md` 流程 | legacy | `./codex-keep-running.sh ./prompt.md` |
+
+最推荐的用户路径：
+
+1. 如果你已经先运行了 `codex` 或 `codex resume`，并且已经在当前聊天里把任务聊清楚了，就优先用聊天窗内 3 种：
+   - `/codex-autoresearch`
+   - `用 codex-autoresearch 把我们刚才聊的需求跑成一个永动机任务。`
+   - `用 research skill 处理我们当前聊天刚才讨论的需求。`
+2. 如果你还没进入 Codex 聊天窗，只是在控制台里，就直接用：
+   - `codex-autoresearch "你的任务"`
+
+一句话判断：
+
+1. 已经在聊天窗里：优先用聊天窗内 3 种
+2. 还在终端里：优先用 `codex-autoresearch "任务"`
+
 ### 1. 直接执行任务
 
 站在你要处理的项目目录里，直接运行：
