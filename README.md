@@ -66,9 +66,9 @@ codex-autoresearch --help
 如果你已经在 `codex resume` 聊天窗里，主路径已经改成固定话术 + 插件走 MCP 自动触发，不再要求先想 shell 命令：
 
 ```text
-用 autoresearch 继续做我们当前聊天里还没完成的事情。
-用 autoresearch 处理我们当前聊天里正在讨论的需求。
-用 autoresearch 在当前目录开一个新任务。
+用 codex-autoresearch 继续做我们当前聊天里还没完成的事情。
+用 codex-autoresearch 处理我们当前聊天里正在讨论的需求。
+用 codex-autoresearch 在当前目录开一个新任务。
 ```
 
 ### 1. 直接执行任务
@@ -207,7 +207,7 @@ MCP 客户端调用示例：
 {
   "tool": "route_chat_intent",
   "arguments": {
-    "chatIntent": "用 autoresearch 继续做我们当前聊天里还没完成的事情。",
+    "chatIntent": "用 codex-autoresearch 继续做我们当前聊天里还没完成的事情。",
     "chatSummary": "继续完善 codex-autoresearch 的 README、插件文案和 MCP 路由测试",
     "workdir": "."
   }
@@ -265,9 +265,9 @@ marketplace 清单在：
 
 插件当前提供的 starter prompts 聚焦三类动作，并且主路径都会优先调用 MCP：
 
-1. 用 autoresearch 继续做我们当前聊天里还没完成的事情
-2. 用 autoresearch 在当前目录开一个新任务
-3. 用 autoresearch 处理当前聊天里的需求
+1. 用 codex-autoresearch 继续做我们当前聊天里还没完成的事情
+2. 用 codex-autoresearch 在当前目录开一个新任务
+3. 用 codex-autoresearch 处理当前聊天里的需求
 
 当前聊天语义说明：
 
@@ -276,7 +276,7 @@ marketplace 清单在：
 3. 当前聊天提供目标、约束和未完事项；当前目录提供执行边界
 4. 插件会先把固定话术和聊天摘要交给 MCP tool `route_chat_intent`
 5. `route_chat_intent` 会自动判断应该走 `resume_session --last` 还是 `run_task`
-6. 如果当前聊天目标和当前目录最近 autoresearch 任务明显冲突，会返回需要确认，而不是静默执行
+6. 如果当前聊天目标和当前目录最近 codex-autoresearch 任务明显冲突，会返回需要确认，而不是静默执行
 
 ### 已经在 `codex resume` 聊天里时怎么用
 
@@ -288,9 +288,9 @@ marketplace 清单在：
 推荐固定话术：
 
 ```text
-用 autoresearch 处理我们当前聊天里正在讨论的需求。
-用 autoresearch 继续做我们当前聊天里还没完成的事情。
-用 autoresearch 在当前目录开一个新任务。
+用 codex-autoresearch 处理我们当前聊天里正在讨论的需求。
+用 codex-autoresearch 继续做我们当前聊天里还没完成的事情。
+用 codex-autoresearch 在当前目录开一个新任务。
 ```
 
 推荐心智已经改成 MCP-first：
@@ -312,7 +312,7 @@ marketplace 清单在：
 什么时候会自动继续：
 
 1. 当前聊天里有“继续”“接着做”“还没完成”等信号
-2. 当前目录下存在最近一次 autoresearch 任务
+2. 当前目录下存在最近一次 codex-autoresearch 任务
 3. 当前聊天目标与最近任务没有明显冲突
 
 什么时候会自动新建：
@@ -324,10 +324,10 @@ marketplace 清单在：
 什么时候会要求确认冲突：
 
 1. 当前聊天同时像“继续旧任务”又像“开新任务”
-2. 当前聊天目标与当前目录最近 autoresearch 任务明显不一致
+2. 当前聊天目标与当前目录最近 codex-autoresearch 任务明显不一致
 3. 当前聊天只说“继续”，但目标仍然过于模糊
 
-当前版本仍然不能自动读取你眼前这个聊天的内部 id，但已经能把“当前聊天的意图”和“当前目录里的 autoresearch 状态链”稳定拼起来。
+当前版本仍然不能自动读取你眼前这个聊天的内部 id，但已经能把“当前聊天的意图”和“当前目录里的 codex-autoresearch 状态链”稳定拼起来。
 
 ### Shell fallback
 
@@ -355,7 +355,7 @@ marketplace 清单在：
 
 关于 slash-like 体验：
 
-当前版本先落稳定的插件卡片和 starter prompts。由于没有确认可用的公开 slash surface，`/autoresearch` 一类入口暂时只作为后续探索项，不影响现在的主流程。
+当前版本先落稳定的插件卡片和 starter prompts。由于没有确认可用的公开 slash surface，`/codex-autoresearch` 一类入口暂时只作为后续探索项，不影响现在的主流程。
 
 固定暴露的工具：
 

@@ -33,9 +33,9 @@ describe("plugin manifest", () => {
     expect(manifest.interface.displayName).toBe("Codex Autoresearch");
     expect(manifest.interface.capabilities).toEqual(["Interactive", "Write"]);
     expect(manifest.interface.defaultPrompt).toEqual([
-      "用 autoresearch 继续做我们当前聊天里还没完成的事情。",
-      "用 autoresearch 在当前目录开一个新任务。",
-      "用 autoresearch 处理我们当前聊天里正在讨论的需求。"
+      "用 codex-autoresearch 继续做我们当前聊天里还没完成的事情。",
+      "用 codex-autoresearch 在当前目录开一个新任务。",
+      "用 codex-autoresearch 处理我们当前聊天里正在讨论的需求。"
     ]);
   });
 
@@ -95,7 +95,7 @@ describe("plugin manifest", () => {
     expect(continueSkill).toContain("route_chat_intent");
     expect(continueSkill).toContain("Before resuming, reference the latest business goal");
     expect(continueSkill).toContain("The current chat decides what should continue.");
-    expect(continueSkill).toContain("If the current chat goal and the current directory’s latest autoresearch task clearly diverge");
+    expect(continueSkill).toContain("If the current chat goal and the current directory’s latest codex-autoresearch task clearly diverge");
     expect(continueSkill).toContain("If MCP is unavailable, use:");
   });
 
@@ -106,7 +106,7 @@ describe("plugin manifest", () => {
     const readme = await readFile(path.resolve("README.md"), "utf8");
 
     expect(readme).toContain("### 已经在 `codex resume` 聊天里时怎么用");
-    expect(readme).toContain("用 autoresearch 继续做我们当前聊天里还没完成的事情。");
+    expect(readme).toContain("用 codex-autoresearch 继续做我们当前聊天里还没完成的事情。");
     expect(readme).toContain("当前聊天提供目标、约束和未完事项");
     expect(readme).toContain("route_chat_intent");
     expect(readme).toContain("当前版本仍然不能自动读取你眼前这个聊天的内部 id");

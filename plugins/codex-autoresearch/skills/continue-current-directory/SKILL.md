@@ -4,7 +4,7 @@ description: Continue the most recent codex-autoresearch task for the current wo
 argument-hint: ""
 ---
 
-Resume the current directory’s most recent autoresearch task.
+Resume the current directory’s most recent codex-autoresearch task.
 
 ## Business Route
 
@@ -15,8 +15,8 @@ Default business rules:
 1. Always scope resume to the current working directory.
 2. Before resuming, reference the latest business goal, constraints, and unfinished work visible in the current chat.
 3. Prefer the current directory’s latest `.codex-run` state only after the current chat makes it clear what should continue.
-4. Reuse the existing task chain when the current chat goal and the current directory’s latest autoresearch task still match.
-5. If the current chat goal and the current directory’s latest autoresearch task clearly diverge, explain the mismatch and ask whether to continue the old task or start a new one.
+4. Reuse the existing task chain when the current chat goal and the current directory’s latest codex-autoresearch task still match.
+5. If the current chat goal and the current directory’s latest codex-autoresearch task clearly diverge, explain the mismatch and ask whether to continue the old task or start a new one.
 
 ## MCP-First Rules
 
@@ -31,12 +31,12 @@ This skill should treat the current chat as the meaning source and the current d
 
 ## Chat-First Resume Rule
 
-This skill exists for the “I am already inside a Codex chat and want autoresearch to keep going” scenario.
+This skill exists for the “I am already inside a Codex chat and want codex-autoresearch to keep going” scenario.
 
 Use a two-stage rule:
 
 1. The current chat decides what should continue.
-2. The current directory decides which autoresearch state chain should be resumed.
+2. The current directory decides which codex-autoresearch state chain should be resumed.
 
 If the current chat does not provide a sufficiently concrete goal yet, ask for a one-sentence restatement before resuming.
 

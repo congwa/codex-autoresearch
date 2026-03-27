@@ -127,7 +127,7 @@ describe("mcp server contracts", () => {
     });
 
     const response = await handlers.routeChatIntentTool({
-      chatIntent: "用 autoresearch 继续做我们当前聊天里还没完成的事情。",
+      chatIntent: "用 codex-autoresearch 继续做我们当前聊天里还没完成的事情。",
       chatSummary: "继续完善 README、插件文案和 MCP 测试",
       workdir: workspace.workdir,
       stateDir
@@ -152,7 +152,7 @@ describe("mcp server contracts", () => {
 
     const handlers = createMcpHandlers();
     const response = await handlers.routeChatIntentTool({
-      chatIntent: "用 autoresearch 处理我们当前聊天里正在讨论的需求。",
+      chatIntent: "用 codex-autoresearch 处理我们当前聊天里正在讨论的需求。",
       chatSummary: "为当前仓库补 README 里的 MCP 用法说明和测试示例。",
       workdir: workspace.workdir,
       stateDir: path.join(workspace.root, ".codex-run")
@@ -160,7 +160,7 @@ describe("mcp server contracts", () => {
     const payload = JSON.parse(response.content[0].text);
 
     expect(payload.action).toBe("run_task");
-    expect(payload.reason).toContain("started a fresh autoresearch task");
+    expect(payload.reason).toContain("started a fresh codex-autoresearch task");
     expect(payload.jobId).toBeTruthy();
   });
 
@@ -184,7 +184,7 @@ describe("mcp server contracts", () => {
     });
 
     const response = await handlers.routeChatIntentTool({
-      chatIntent: "用 autoresearch 继续做我们当前聊天里还没完成的事情。",
+      chatIntent: "用 codex-autoresearch 继续做我们当前聊天里还没完成的事情。",
       chatSummary: "继续重写 README 的安装指南和插件市场说明。",
       workdir: workspace.workdir,
       stateDir
@@ -193,6 +193,6 @@ describe("mcp server contracts", () => {
 
     expect(payload.action).toBe("conflict");
     expect(payload.status).toBe("needs_confirmation");
-    expect(payload.reason).toContain("different from the latest current-directory autoresearch task");
+    expect(payload.reason).toContain("different from the latest current-directory codex-autoresearch task");
   });
 });

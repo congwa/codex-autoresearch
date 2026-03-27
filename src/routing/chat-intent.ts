@@ -57,7 +57,7 @@ export async function routeChatIntentWithPolicies(
   if (hasContinueSignal && latestTask && isConflictingGoal(chatSummary, latestPrompt, similarity)) {
     return buildConflictRouteResult(
       command,
-      "The current chat goal appears different from the latest current-directory autoresearch task. Ask whether to continue the old task or start a new one.",
+      "The current chat goal appears different from the latest current-directory codex-autoresearch task. Ask whether to continue the old task or start a new one.",
       latestTask.stateDir
     );
   }
@@ -70,7 +70,7 @@ export async function routeChatIntentWithPolicies(
     });
     return {
       action: "resume_session",
-      reason: "The current chat indicates unfinished work, so the route reused the latest autoresearch task in the current directory.",
+      reason: "The current chat indicates unfinished work, so the route reused the latest codex-autoresearch task in the current directory.",
       chatIntent: command.chatIntent,
       chatSummary,
       latestTaskMatched: true,
@@ -89,7 +89,7 @@ export async function routeChatIntentWithPolicies(
     });
     return {
       action: "run_task",
-      reason: "No resumable current-directory task was found, so the route started a new task from the current chat summary.",
+      reason: "No resumable current-directory codex-autoresearch task was found, so the route started a new task from the current chat summary.",
       chatIntent: command.chatIntent,
       chatSummary,
       latestTaskMatched: false,
@@ -116,8 +116,8 @@ export async function routeChatIntentWithPolicies(
   return {
     action: "run_task",
     reason: hasNewTaskSignal
-      ? "The current chat explicitly asks for a new task, so the route started a fresh autoresearch task."
-      : "The current chat does not clearly ask to continue, so the route started a fresh autoresearch task from the chat summary.",
+      ? "The current chat explicitly asks for a new task, so the route started a fresh codex-autoresearch task."
+      : "The current chat does not clearly ask to continue, so the route started a fresh codex-autoresearch task from the chat summary.",
     chatIntent: command.chatIntent,
     chatSummary,
     latestTaskMatched: latestTask ? similarity >= 0.2 : false,

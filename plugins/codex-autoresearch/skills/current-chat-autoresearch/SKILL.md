@@ -1,6 +1,6 @@
 ---
 name: current-chat-autoresearch
-description: Use codex-autoresearch from the current Codex chat and current working directory. Prefer this when the user wants autoresearch to act on what they are already discussing in the current chat.
+description: Use codex-autoresearch from the current Codex chat and current working directory. Prefer this when the user wants codex-autoresearch to act on what they are already discussing in the current chat.
 argument-hint: "[task-or-intent]"
 ---
 
@@ -31,9 +31,9 @@ Preferred route:
 Use the following fixed phrases as the recommended chat-side prompts:
 
 ```text
-用 autoresearch 处理我们当前聊天里正在讨论的需求。
-用 autoresearch 继续做我们当前聊天里还没完成的事情。
-用 autoresearch 在当前目录开一个新任务。
+用 codex-autoresearch 处理我们当前聊天里正在讨论的需求。
+用 codex-autoresearch 继续做我们当前聊天里还没完成的事情。
+用 codex-autoresearch 在当前目录开一个新任务。
 ```
 
 ## MCP Tool Contract
@@ -54,11 +54,11 @@ It may return:
 
 ## Continue Route
 
-If the user says anything equivalent to “用 autoresearch 继续做”, “继续做”, “继续当前目录任务”, or “pick up where we left off”, do not create a new task immediately. First summarize the latest task goal and unfinished business from the current chat, then call `route_chat_intent`.
+If the user says anything equivalent to “用 codex-autoresearch 继续做”, “继续做”, “继续当前目录任务”, or “pick up where we left off”, do not create a new task immediately. First summarize the latest task goal and unfinished business from the current chat, then call `route_chat_intent`.
 
-The current chat decides what should continue. The current directory decides which autoresearch task chain to attach to.
+The current chat decides what should continue. The current directory decides which codex-autoresearch task chain to attach to.
 
-If the latest task goal from the current chat is clearly different from the current directory’s latest autoresearch task, do not silently resume. Explain the conflict and ask whether the user wants to continue the old task or start a new one.
+If the latest task goal from the current chat is clearly different from the current directory’s latest codex-autoresearch task, do not silently resume. Explain the conflict and ask whether the user wants to continue the old task or start a new one.
 
 ## Shell Fallback
 

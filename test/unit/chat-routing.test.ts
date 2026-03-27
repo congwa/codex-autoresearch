@@ -12,7 +12,7 @@ describe("chat intent routing", () => {
   it("routes continue intent to resume when latest task matches", async () => {
     const result = await routeChatIntentWithPolicies(
       {
-        chatIntent: "用 autoresearch 继续做我们当前聊天里还没完成的事情。",
+        chatIntent: "用 codex-autoresearch 继续做我们当前聊天里还没完成的事情。",
         chatSummary: "继续完善 README 和 MCP 测试",
         stateDir: "/tmp/.codex-run"
       },
@@ -44,7 +44,7 @@ describe("chat intent routing", () => {
   it("routes non-continue intent to a new task", async () => {
     const result = await routeChatIntentWithPolicies(
       {
-        chatIntent: "用 autoresearch 处理我们当前聊天里正在讨论的需求。",
+        chatIntent: "用 codex-autoresearch 处理我们当前聊天里正在讨论的需求。",
         chatSummary: "实现 README 的安装说明收敛。",
         workdir: "/repo",
         stateDir: "/repo/.codex-run"
@@ -74,7 +74,7 @@ describe("chat intent routing", () => {
   it("returns conflict when continue intent diverges from latest task", async () => {
     const result = await routeChatIntentWithPolicies(
       {
-        chatIntent: "用 autoresearch 继续做我们当前聊天里还没完成的事情。",
+        chatIntent: "用 codex-autoresearch 继续做我们当前聊天里还没完成的事情。",
         chatSummary: "继续重写 README 的安装部分和插件说明。"
       },
       {
@@ -118,6 +118,6 @@ describe("chat intent routing", () => {
     );
 
     expect(result.action).toBe("run_task");
-    expect(result.reason).toContain("No resumable current-directory task was found");
+    expect(result.reason).toContain("No resumable current-directory codex-autoresearch task was found");
   });
 });

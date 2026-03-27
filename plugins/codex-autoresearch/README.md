@@ -10,7 +10,7 @@
 
 设计目标：
 
-1. 当前聊天里直接触发 autoresearch
+1. 当前聊天里直接触发 codex-autoresearch
 2. 默认使用当前工作目录
 3. 默认继续当前目录最近任务，而不是让你手动找 session
 
