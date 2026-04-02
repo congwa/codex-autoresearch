@@ -9,6 +9,7 @@
  * 典型场景：
  * - `WORKDIR_NOT_FOUND`：用户目录写错了，应该直接报错并停止。
  * - `SKILL_INPUT_MISSING`：缺少业务输入，应该提示补参后重试。
+ * - `MCP_TOOL_CALL_CANCELLED`：任务内部关键 MCP 调用被宿主环境取消，当前轮不得判完成，但可后续 resume。
  */
 export interface JobErrorInfo {
   code: string;

@@ -1,692 +1,80 @@
 # codex-autoresearch
 
-一个把 Codex 长任务执行统一收口到 TypeScript/Node 的工具仓库。现在它不再要求你先手写 `prompt.md`，而是同时提供：
+它的目标很直接：当你希望 Codex 在无人值守时持续推进同一项任务，这个脚本会先发起一次 `codex exec`，之后不断对同一会话执行 `codex exec resume`，直到收到严格的完成协议为止，而不是仅凭一句“我做完了”就停下。
 
-1. CLI 直接执行任务
-2. 仓库自有 Skills 作为一等任务配方
-3. MCP server 作为对外执行服务
-4. Codex 插件作为“当前聊天 / 当前目录”入口
-5. `codex-keep-running.sh` 作为旧入口兼容层
+核心架构：
 
-底层仍然保留原有长任务核心能力：首轮 `codex exec`、后续 `codex exec resume`、严格 completion protocol、session 恢复、状态持久化和失败后续跑；只是这些能力已经下沉为共享执行引擎，不再只存在于单个 Bash 脚本里。
+1. **CLI** 直接执行任务或从 prompt 文件启动
+2. **MCP server** 作为对外执行服务
+3. **Skills** 作为可复用任务配方
+4. **codex-keep-running.sh** 作为 shell 形式的文件驱动入口
+
+任务定义只认 prompt 文件或显式文本参数。不支持根据当前聊天自动总结任务、不支持"最近 N 轮"触发、不支持 slash/chat 路由。对于 MCP 自动化，推荐先生成 prompt.md 再调用。
 
 ## 安装
-
-你现在可以按 4 种方式接入本项目：
-
-| 方式 | 适合场景 | 安装 / 接入方式 | 触发方式 |
-| --- | --- | --- | --- |
-| 本地命令 | 你就在项目目录里，想直接跑永动机 | `npm install && npm run build`，然后直接运行本地 bin 或全局 bin | `codex-autoresearch "任务"` |
-| 全局命令 | 你希望任意项目目录里都能直接敲命令 | `npm install -g .` 或后续发布到 npm 后 `npm install -g codex-autoresearch` | `codex-autoresearch "任务"` |
-| MCP server | 你要把本项目暴露给外部 agent / 插件 / MCP client | 构建后运行 `codex-autoresearch mcp serve`，或通过插件内 `.mcp.json` 连接 | `run_task` / `run_skill` / `resume_session` / `get_session_status` / `tail_session` / `start_from_current_chat` / `continue_current_directory_task` / `run_skill_from_current_chat` |
-| 仓库自有 skill | 你希望把常用任务做成可复用配方 | 无需额外安装，构建后直接用 CLI 或 MCP 调用 `skills/<name>/skill.yaml + prompt.md` | `codex-autoresearch skill run ...` 或 MCP `run_skill` |
-| Codex 插件 | 你已经在 Codex 聊天窗里，希望直接在当前窗口触发 | 使用仓库内 `plugins/codex-autoresearch/` 和 `.agents/plugins/marketplace.json` 安装本地插件；`/codex-autoresearch` 目前要求 ChatGPT 登录的 Codex Desktop | `/codex-autoresearch` / 自然语言 / 显式 skill 名 |
-
-插件入口提醒：
-
-1. 如果你想使用 `/codex-autoresearch`，请优先确认当前 Codex Desktop 是 ChatGPT 登录态。
-2. 如果你当前是 API key 或 custom provider 模式，推荐直接使用自然语言、MCP 或 CLI，不要先假设 slash 可见。
-3. 如果你要在当前聊天里持续看执行进度，请在任务启动后轮询 MCP `tail_session`，不要误用 `resume_session` 做纯查看。
-
-最小本地安装：
 
 ```bash
 npm install
 npm run build
 ```
 
-构建后会生成 npm bin：
-
-```bash
-./dist/src/cli.js --help
-```
-
-如果通过 npm 安装到全局或作为依赖使用，则直接运行：
-
-```bash
-codex-autoresearch --help
-```
-
-如果你想把它装成全局命令：
+全局安装：
 
 ```bash
 npm install -g .
 codex-autoresearch --help
 ```
 
-## 快速开始
+## 最推荐路径：prompt.md + CLI
 
-### 最常用速查表
+站在目标项目目录里，准备好一个 prompt.md 文件，然后：
 
-如果你只想记最常用的几种方式，先看这里：
-
-| 场景 | 直接用法 |
-| --- | --- |
-| 当前目录启动一个新永动机任务 | `codex-autoresearch "你的任务"` |
-| 当前目录继续最近任务 | `codex-autoresearch session resume --last` |
-| 在当前聊天里查看最近执行步骤 | MCP `tail_session` |
-| 运行仓库内置 skill | `codex-autoresearch skill run research --set topic=...` |
-| 启动 MCP server | `codex-autoresearch mcp serve` |
-| 打开交互入口 | `codex-autoresearch` |
-| 在 Codex Desktop 打开当前目录 | `codex-autoresearch app` |
-
-如果你已经在 `codex resume` 聊天窗里，主路径已经改成“当前聊天最近 8 轮 + 插件走 MCP 自动触发”，不再要求先想 shell 命令：
-
-前提提醒：
-
-1. `/codex-autoresearch` 这条路径要求 Codex Desktop 插件系统可用。
-2. 当前已知最稳定的前提是 ChatGPT 登录态。
-3. 如果你使用 API key / custom provider，请优先改用下面两条自然语言路径。
-
-```text
-/codex-autoresearch
-用 codex-autoresearch 把我们刚才聊的需求跑成一个永动机任务。
-用 research skill 处理我们当前聊天刚才讨论的需求。
+```bash
+codex-autoresearch --prompt-file ./prompt.md
+# 或
+codex-autoresearch run --prompt-file ./prompt.md
 ```
 
-### 在当前聊天里展示执行步骤
-
-如果你的目标是“在 Codex 当前聊天里一边触发永动机，一边看到它最新做到哪了”，推荐固定拆成两类 MCP 调用：
-
-1. 启动或续跑：
-   - `start_from_current_chat`
-   - `continue_current_directory_task`
-   - `run_skill_from_current_chat`
-   - `run_task`
-   - `run_skill`
-   - `resume_session`
-2. 纯查看最近进度：
-   - `tail_session`
-
-`tail_session` 不会推进执行，只会读取目标任务状态目录里的：
-
-1. `lastMessage`
-2. `runnerLogTail`
-3. `eventLogTail`
-4. `attemptCount / status / updatedAt`
-
-典型聊天内流程：
-
-```text
-先调用 start_from_current_chat，把我们刚才聊的需求跑成一个永动机任务；如果没有成功调用 MCP 就停止。
-然后每次只调用 tail_session(useLast=true, tailLines=30) 查看最近执行步骤，不要直接开始新的实现。
-```
-
-这样当前聊天就能把“任务已启动”和“最近几步执行痕迹”拆开显示，停电后也仍然可以继续用 `resume_session` 或 CLI `session resume --last` 恢复。
-
-### 什么时候用哪一种
-
-如果你只想知道“我现在该用哪一种方式”，直接看这张表：
-
-| 你当前在哪 | 你想干嘛 | 推荐用法 | 例子 |
-| --- | --- | --- | --- |
-| Codex 聊天窗里 | 把刚才聊天直接交给永动机 | `slash` | `/codex-autoresearch` |
-| Codex 聊天窗里 | 用人话触发永动机 | 自然语言 | `用 codex-autoresearch 把我们刚才聊的需求跑成一个永动机任务。` |
-| Codex 聊天窗里 | 按某个仓库 skill 跑 | 显式 skill | `用 research skill 处理我们当前聊天刚才讨论的需求。` |
-| 终端里 | 直接新开任务 | CLI 直接任务 | `codex-autoresearch "修这个问题"` |
-| 终端里 | 继续当前目录最近任务 | CLI resume | `codex-autoresearch session resume --last` |
-| 终端里 | 运行仓库任务配方 | CLI skill | `codex-autoresearch skill run research --set topic=...` |
-| 终端里 | 给外部 agent / 插件提供能力 | MCP | `codex-autoresearch mcp serve` |
-| 终端里 | 兼容旧 `prompt.md` 流程 | legacy | `./codex-keep-running.sh ./prompt.md` |
-
-最推荐的用户路径：
-
-1. 如果你已经先运行了 `codex` 或 `codex resume`，并且已经在当前聊天里把任务聊清楚了，就优先用聊天窗内 3 种：
-   - `/codex-autoresearch`
-   - `用 codex-autoresearch 把我们刚才聊的需求跑成一个永动机任务。`
-   - `用 research skill 处理我们当前聊天刚才讨论的需求。`
-2. 如果你还没进入 Codex 聊天窗，只是在控制台里，就直接用：
-   - `codex-autoresearch "你的任务"`
-
-一句话判断：
-
-1. 已经在聊天窗里：优先用聊天窗内 3 种
-2. 还在终端里：优先用 `codex-autoresearch "任务"`
-
-### 1. 直接执行任务
-
-站在你要处理的项目目录里，直接运行：
+也可以直接传任务文本：
 
 ```bash
 codex-autoresearch "请检查当前仓库 TODO，补齐缺失测试并更新 README"
 ```
 
-这等价于：
+## MCP 路径
 
-```bash
-codex-autoresearch run "请检查当前仓库 TODO，补齐缺失测试并更新 README"
-```
-
-如果你已经在 Codex 聊天里，也可以安装本仓库自带的插件并直接在当前聊天里触发，不再额外思考路径和 session。
-
-默认行为：
-
-| 默认项 | 说明 |
-| --- | --- |
-| 工作目录 | 当前 shell 目录 |
-| 状态目录 | 当前目录下的 `.codex-run/` |
-
-只有在高级场景下，才需要显式传参数：
-
-| 参数 | 作用 |
-| --- | --- |
-| `--workdir` | Codex 实际执行的仓库目录 |
-| `--state-dir` | 状态根目录，任务会落到 `.codex-run/<job-id>/` |
-| `--model` | 透传给 `codex exec -m` |
-| `--profile` | 透传给 `codex exec --profile` |
-| `--interactive` | 缺失参数时允许交互补齐 |
-| `--skip-git-repo-check` | 跳过 git 仓库校验 |
-| `--dangerously-bypass` | 启用危险绕过模式 |
-| `--no-full-auto` | 关闭默认的 `--full-auto` |
-
-无参数启动会进入交互式入口，可选择直接任务、运行 skill、继续最近任务或在 Codex Desktop 打开当前目录：
-
-```bash
-codex-autoresearch
-```
-
-## 6 种方式详细安装与使用
-
-这一节给你一套可以直接照抄执行的完整流程。每种方式都包含：
-
-1. 适用场景
-2. 安装前提
-3. 执行步骤
-4. 成功判定
-
-### 方式 1：顶层直接任务（推荐默认）
-
-适用场景：你已经在目标项目目录里，想最快启动一个任务。
-
-安装前提：
-
-```bash
-npm install
-npm run build
-```
-
-如果希望任意目录可用，再执行：
-
-```bash
-npm install -g .
-```
-
-执行步骤：
-
-```bash
-codex-autoresearch "请检查当前仓库 TODO 并补齐测试"
-```
-
-成功判定：
-
-1. 命令返回 JSON，包含 `jobId`、`sessionId`、`stateDir`、`status`
-2. 状态目录下能看到 `meta.json`、`events.jsonl`、`runner.log`
-
-### 方式 2：`run` 子命令（显式模式）
-
-适用场景：你希望命令语义更清晰，或要显式传全局参数。
-
-安装前提：同方式 1。
-
-执行步骤：
-
-```bash
-codex-autoresearch --state-dir ./test/manual/runtime/method-run run "请输出当前仓库入口清单"
-```
-
-成功判定：
-
-1. 返回 JSON 的 `stateDir` 位于你指定的 `--state-dir` 下
-2. `status` 为 `completed` 或可续跑状态
-
-### 方式 3：`skill run` 配方执行
-
-适用场景：你希望把常见任务模板化，避免每次手写长提示词。
-
-安装前提：
-
-1. 完成方式 1 的安装
-2. 仓库内存在 `skills/<name>/skill.yaml + prompt.md`
-
-执行步骤：
-
-```bash
-codex-autoresearch skill list
-codex-autoresearch skill run research --set topic=当前仓库可用入口
-```
-
-缺参时可交互补齐：
-
-```bash
-codex-autoresearch --interactive skill run phased-validation
-```
-
-成功判定：
-
-1. `skill list` 能看到仓库内技能
-2. `skill run` 返回 `jobId/sessionId/stateDir`
-
-### 方式 4：`session` 状态查询与续跑
-
-适用场景：长任务中断后继续，或只查看最近任务状态。
-
-安装前提：先通过方式 1/2/3 跑出至少一个任务。
-
-执行步骤：
-
-```bash
-codex-autoresearch session status --last
-codex-autoresearch session resume --last
-```
-
-按指定 session 继续：
-
-```bash
-codex-autoresearch session resume <session-id>
-```
-
-成功判定：
-
-1. `status --last` 返回最近任务状态
-2. `resume --last` 返回同一任务链的 `jobId/sessionId`
-
-### 方式 5：MCP 服务调用
-
-适用场景：你要给外部 agent、插件、自动化编排系统调用。
-
-安装前提：完成构建（`npm run build`）。
-
-执行步骤：
+启动 MCP server：
 
 ```bash
 codex-autoresearch mcp serve
 ```
 
-外部调用工具：
+### MCP 工具集
 
-1. `run_task`
-2. `run_skill`
-3. `resume_session`
-4. `get_session_status`
-5. `list_skills`
-6. `start_from_current_chat`
-7. `continue_current_directory_task`
-8. `run_skill_from_current_chat`
-
-最小调用示例：
-
-```json
-{
-  "tool": "run_task",
-  "arguments": {
-    "task": "请输出当前仓库入口清单"
-  }
-}
-```
-
-成功判定：
-
-1. 工具调用返回稳定 JSON 文本
-2. 执行类工具返回 `jobId/sessionId/stateDir/status/lastMessageFile`
-
-### 方式 6：`prompt.md + codex-keep-running.sh` 兼容链路
-
-适用场景：你已有旧脚本、旧习惯，仍想保留 `prompt.md` 驱动。
-
-安装前提：
-
-1. 完成构建（`npm run build`）
-2. 准备好 `prompt.md`
-
-执行步骤：
-
-```bash
-WORKDIR=$(pwd) \
-STATE_DIR=$(pwd)/test/manual/runtime/method-legacy \
-./codex-keep-running.sh ./test/manual/prompts/legacy-readonly.md
-```
-
-也支持 stdin：
-
-```bash
-cat ./test/manual/prompts/legacy-readonly.md | \
-WORKDIR=$(pwd) STATE_DIR=$(pwd)/test/manual/runtime/method-legacy \
-./codex-keep-running.sh -
-```
-
-成功判定：
-
-1. 返回 JSON 含 `jobId/sessionId/stateDir/status`
-2. `STATE_DIR/latest-job.txt` 存在
-3. `STATE_DIR/<job-id>/` 下有 `meta.json`、`runner.log`、`session-id.txt`
-
-### 2. 查看和执行 Skills
-
-这里的 skill 指“本仓库自带的任务配方”，是项目自己的协议：
-
-```text
-skills/<name>/skill.yaml
-skills/<name>/prompt.md
-```
-
-它和 Codex 插件是两回事。
-
-也就是说：
-
-1. 插件是聊天入口
-2. skill 是任务配方
-3. 插件可以触发 MCP，MCP 也可以运行 skill
-4. 但插件本身不等于 skill，skill 本身也不等于插件
-
-列出仓库内置 skills：
-
-```bash
-codex-autoresearch skill list
-```
-
-执行 skill：
-
-```bash
-codex-autoresearch skill run research \
-  --set topic=GPT-5.4升级影响 \
-  --set constraints=只关注当前仓库迁移方案
-```
-
-交互补齐缺失参数：
-
-```bash
-codex-autoresearch --interactive skill run phased-validation
-```
-
-当前仓库内置了两个示例 skill：
-
-1. `research`：通用 research 和交叉核对
-2. `phased-validation`：分阶段长任务执行与验收
-
-`skill.yaml` v1 字段：
-
-| 字段 | 说明 |
+| 工具 | 说明 |
 | --- | --- |
-| `name` | Skill 名称 |
-| `description` | Skill 用途说明 |
-| `inputs` | 输入参数定义 |
-| `defaultWorkdir` | 默认执行目录 |
-| `defaultModel` | 默认模型 |
-| `outputContract` | 预期输出约束 |
+| `start_task_from_prompt_file` | 从 prompt 文件启动新任务，文件内容作为唯一初始 prompt |
+| `run_task` | 运行一个直接任务 |
+| `run_skill` | 运行仓库内 skill 配方 |
+| `resume_session` | 续跑已有 session 或最近一次任务 |
+| `get_session_status` | 读取已有任务状态 |
+| `tail_session` | 读取已有任务最近的执行步骤与日志尾部 |
+| `list_skills` | 列出仓库内可用 skills |
 
-### 3. 恢复已有任务
-
-恢复最近一次任务：
-
-```bash
-codex-autoresearch session resume --last
-```
-
-按 session id 查看或继续：
-
-```bash
-codex-autoresearch session status 11111111-1111-1111-1111-111111111111
-codex-autoresearch session resume 11111111-1111-1111-1111-111111111111
-```
-
-### 4. 启动 MCP server
-
-把本项目暴露成 MCP 执行服务：
-
-```bash
-codex-autoresearch mcp serve
-```
-
-MCP 客户端调用示例：
+推荐主路径示例：
 
 ```json
 {
-  "tool": "run_task",
+  "tool": "start_task_from_prompt_file",
   "arguments": {
-    "task": "请检查当前仓库 TODO 并输出修复建议"
+    "promptFile": "./prompt.md"
   }
 }
 ```
 
-聊天窗内 slash / 自然语言 / 显式 skill 现在分别走当前聊天专用 MCP 工具。最小示例：
+每个执行类 tool 都会返回 `jobId`、`sessionId`、`stateDir`、`status`、`lastMessageFile`。
 
-```json
-{
-  "tool": "start_from_current_chat",
-  "arguments": {
-    "chatIntent": "/codex-autoresearch",
-    "chatWindowTurns": [
-      "我们已经把 CLI 安装说明补好了。",
-      "还差 README 的聊天窗触发说明和 MCP 路由测试。"
-    ],
-    "chatSummary": "继续补 README 的聊天窗触发说明和 MCP 路由测试。",
-    "workdir": "."
-  }
-}
-```
-
-如果你是外部 agent，推荐优先用：
-
-1. `start_from_current_chat`：把当前聊天最近 8 轮收敛成任务并自动判断续跑还是新建
-2. `continue_current_directory_task`：你明确是在说“继续当前目录里这件事”
-3. `run_skill_from_current_chat`：你想按仓库 skill 配方消化当前聊天上下文
-4. `run_task`：你已经有明确任务文本
-5. `run_skill`：你已经有明确的 skill 输入
-6. `resume_session`：你已经明确要接到某条现有任务链
-
-### 5. 在 Codex Desktop 中打开当前目录
-
-如果你已经站在对的目录里，只想一键用 Codex Desktop 打开它：
-
-```bash
-codex-autoresearch app
-```
-
-### 6. 在 Codex 聊天里使用插件
-
-重要前提：
-
-1. 想在 `/` 列表里看到 `/codex-autoresearch`，当前需要 ChatGPT 登录的 Codex Desktop。
-2. 如果当前是 API key 鉴权或 custom provider 模式，插件同步可能失败，此时即使 MCP server 正常，slash 入口也可能不可见。
-3. 遇到这种情况时，请直接改用自然语言触发、MCP tool 或 CLI。
-
-仓库现在内置了 repo-local Codex 插件，位置在：
-
-```text
-plugins/codex-autoresearch/
-```
-
-marketplace 清单在：
-
-```text
-.agents/plugins/marketplace.json
-```
-
-本地插件安装素材已经在仓库里：
-
-1. 插件 manifest：[plugin.json](/Users/wang/code/my/codex-autoresearch/plugins/codex-autoresearch/.codex-plugin/plugin.json)
-2. 插件 MCP 绑定：[.mcp.json](/Users/wang/code/my/codex-autoresearch/plugins/codex-autoresearch/.mcp.json)
-3. marketplace 清单：[marketplace.json](/Users/wang/code/my/codex-autoresearch/.agents/plugins/marketplace.json)
-4. 插件说明：[plugins README](/Users/wang/code/my/codex-autoresearch/plugins/codex-autoresearch/README.md)
-
-插件入口的设计目标是：
-
-1. 在当前聊天里复用当前目录
-2. 默认只看当前聊天最近 8 轮
-3. 自动判断继续当前目录最近任务、开新任务，还是运行显式 skill
-4. 不要求你先想 `workdir`、`state-dir` 或 session id
-
-这里也需要特别区分：
-
-1. Codex 插件是聊天里的入口层
-2. 本仓库 `skills/` 目录是项目自己的任务配方层
-3. 插件目录下如果出现 `SKILL.md`，那是插件侧辅助说明或插件侧可挂载能力，不等于仓库主 `skills/` 协议
-4. 这两层可以协作，但概念上不混用
-
-插件当前提供 3 条正式聊天窗路径，并且主路径都会优先调用 MCP：
-
-1. `/codex-autoresearch`
-2. 用自然语言触发 `codex-autoresearch`
-3. 在当前聊天里显式说仓库 skill 名，例如 `research`、`phased-validation`
-
-当前聊天语义说明：
-
-1. 插件不会直接读取你此刻正在看的 chat id
-2. 插件默认只提炼当前聊天最近 8 轮
-3. 当前聊天最近 8 轮提供目标、约束和未完事项；当前目录提供执行边界
-4. 插件会根据用户意图选择 `start_from_current_chat`、`continue_current_directory_task` 或 `run_skill_from_current_chat`
-5. 这些 MCP 工具会在内部自动判断应该走 `resume_session`、`run_task` 还是 `run_skill`
-6. 如果当前聊天目标和当前目录最近 codex-autoresearch 任务明显冲突，会返回需要确认，而不是静默执行
-
-### 已经在 `codex resume` 聊天里时怎么用
-
-如果你已经运行了 `codex resume` 进入某个聊天窗，正式推荐 3 条路径：
-
-```text
-/codex-autoresearch
-用 codex-autoresearch 把我们刚才聊的需求跑成一个永动机任务。
-用 research skill 处理我们当前聊天刚才讨论的需求。
-```
-
-推荐心智已经改成 MCP-first：
-
-1. 当前聊天最近 8 轮是意图来源，不是 thread id 来源
-2. 当前目录是执行边界
-3. `/codex-autoresearch` 默认会把当前聊天最近 8 轮整理后调用 `start_from_current_chat`
-4. 自然语言路径会在 `start_from_current_chat` 或 `continue_current_directory_task` 之间选择
-5. 显式 skill 路径会把当前聊天最近 8 轮整理成 skill 输入，再调用 `run_skill_from_current_chat`
-6. 如果判断到聊天目标和当前目录最近任务冲突，会先要求确认
-
-为什么现在比之前更简单：
-
-1. 你不需要先想 `workdir`
-2. 你不需要先想 `state-dir`
-3. 你不需要先找 session id
-4. 你不需要退回 shell 手写 `codex-autoresearch ...` 命令
-5. 你只需要在当前聊天里用 slash、自然语言或显式 skill 名，插件就会通过 MCP 触发本项目
-
-什么时候会自动继续：
-
-1. 当前聊天最近 8 轮明显仍然在延续同一目标
-2. 当前目录下存在最近一次 codex-autoresearch 任务
-3. 当前聊天目标与最近任务没有明显冲突
-
-什么时候会自动新建：
-
-1. 当前聊天最近 8 轮明显是在说一个新需求或新 deliverable
-2. 当前目录没有可续跑任务
-3. 当前聊天最近 8 轮已经能提炼出足够具体的任务摘要
-
-什么时候会自动运行显式 skill：
-
-1. 当前聊天里明确说了 skill 名，例如 `research`
-2. 当前聊天最近 8 轮足以补齐该 skill 的关键输入
-3. 路由层确认这是“按配方执行”的场景，而不是 generic direct task
-
-什么时候会要求确认冲突：
-
-1. 当前聊天同时像“继续旧任务”又像“开新任务”
-2. 当前聊天目标与当前目录最近 codex-autoresearch 任务明显不一致
-3. 当前聊天只说“继续”，但目标仍然过于模糊
-
-当前版本仍然不能自动读取你眼前这个聊天的内部 id，但已经能把“当前聊天的意图”和“当前目录里的 codex-autoresearch 状态链”稳定拼起来。
-
-### Shell fallback
-
-如果插件或 MCP 暂时不可用，才退回命令方式。
-
-已经全局安装 `codex-autoresearch` 时，可以在聊天里这样说：
-
-```text
-请在当前目录执行：codex-autoresearch session resume --last
-```
-
-```text
-请先把我们当前聊天的目标总结成一句任务，再在当前目录执行：codex-autoresearch "<总结后的任务>"
-```
-
-如果还没有全局安装，而你就在本仓库目录里，可以改成：
-
-```text
-请在当前目录执行：node ./dist/src/cli.js session resume --last
-```
-
-```text
-请先把我们当前聊天的目标总结成一句任务，再在当前目录执行：node ./dist/src/cli.js "<总结后的任务>"
-```
-
-关于 slash 能力：
-
-当前版本把 `/codex-autoresearch` 定义为插件安装后的正式聊天窗入口。仅装 CLI 不会自动把同名 slash 注册到任意 Codex 聊天窗里，必须走插件链路。
-
-当前已知限制：
-
-1. `/codex-autoresearch` 依赖 Codex Desktop 的插件系统正常工作。
-2. 该插件系统当前要求使用 ChatGPT 账号登录的 Codex Desktop。
-3. 如果你当前是 API key 鉴权，或使用 custom provider 直连模型，插件系统可能无法完成 plugin sync，`/` 列表里也不会出现 `/codex-autoresearch`。
-4. 在这类环境下，本项目仍可通过 MCP 和 CLI 使用，但不能承诺 slash 入口可用。
-
-一句话判断：
-
-1. 想使用 `/codex-autoresearch`：请先用 ChatGPT 登录 Codex Desktop。
-2. 如果你使用的是 API key / custom provider：优先改用自然语言触发、MCP tool 或 CLI，不要假设 slash 一定可见。
-
-固定暴露的工具：
-
-1. `run_task`
-2. `run_skill`
-3. `resume_session`
-4. `get_session_status`
-5. `tail_session`
-6. `list_skills`
-7. `start_from_current_chat`
-8. `continue_current_directory_task`
-9. `run_skill_from_current_chat`
-
-每个执行类 tool 都会返回：
-
-1. `jobId`
-2. `sessionId`
-3. `stateDir`
-4. `status`
-5. `lastMessageFile`
-
-当前聊天类 tool 额外会返回：
-
-1. `action`，表示选择了 `resume_session`、`run_task`、`run_skill` 或 `conflict`
-2. `reason`，解释为什么这样路由
-3. `chatIntent`
-4. `chatSummary`
-5. `triggerMode`
-6. `skillName`
-
-这样外部 agent 可以继续查询、续跑同一任务。
-
-## 现在到底支持哪些用法
-
-目前已经正式支持 8 条用户路径：
-
-1. 本地命令直接跑任务：`codex-autoresearch "任务"`
-2. 本地命令继续最近任务：`codex-autoresearch session resume --last`
-3. 本地命令运行仓库 skill：`codex-autoresearch skill run <skill-name>`
-4. 作为 MCP server 被外部调用：`codex-autoresearch mcp serve`
-5. 在 Codex 聊天里通过插件执行 `/codex-autoresearch`
-6. 在 Codex 聊天里通过自然语言触发当前聊天最近 8 轮的永动机任务
-7. 在 Codex 聊天里显式说仓库 skill 名触发 skill 型永动机
-8. 旧入口兼容：`codex-keep-running.sh <prompt.md|- >`
-
-如果你问“本地命令、MCP、skill 都支持了吗”，当前答案是支持。
-
-更具体地说：
-
-1. 本地命令入口已经稳定
-2. MCP 工具集已经稳定，包含当前聊天专用工具
-3. 仓库内 skill 已可通过 CLI 和 MCP 复用
-4. Codex 聊天内插件入口已经改成 MCP-first，并按场景调用当前聊天专用工具
-5. 当前聊天窗里的 slash、自然语言、显式 skill 三条路径仍然收口到同一条内部执行链
-6. 旧的 `codex-keep-running.sh` 仍然兼容，但不再是首选入口
-
-## 状态目录
+## .codex-run 状态模型
 
 统一执行引擎会把状态写到：
 
@@ -698,47 +86,72 @@ marketplace 清单在：
 
 | 文件 | 作用 |
 | --- | --- |
-| `meta.json` | 任务元信息、状态、配置、session 绑定结果 |
+| `meta.json` | 任务元信息、状态、配置、prompt 来源 |
 | `events.jsonl` | Codex JSON 事件流 |
 | `runner.log` | 执行日志和错误输出 |
 | `last-message.txt` | 最近一轮 assistant 最终输出 |
 | `session-id.txt` | 从事件流提取的 session id |
-| `initial-prompt.txt` | 首轮真正下发给 Codex 的任务 |
+| `initial-prompt.txt` | 首轮真正下发给 Codex 的任务（prompt 文件快照） |
 | `resume-prompt.txt` | 后续 resume 使用的续跑提示 |
-| `attempt-0001.last.txt` | 每轮结束时的消息快照 |
 
-状态根目录还会维护 `latest-job.txt`，用于 `session resume --last` 和兼容层恢复最近任务。
+`meta.json` 中记录的 prompt 来源字段：
 
-### 状态目录迁移说明
+| 字段 | 说明 |
+| --- | --- |
+| `promptSource` | `"file"` / `"text"` / `"skill"` |
+| `sourcePromptFile` | 原始 prompt 文件绝对路径（仅 `promptSource: "file"` 时有值） |
 
-新版本的正式布局固定为 `.codex-run/<job-id>/`。如果你继续使用 `codex-keep-running.sh`，`STATE_DIR` 现在会被视为状态根目录，而不是单个任务目录；兼容层会通过 `latest-job.txt` 找到最近一次任务继续运行，不再承诺旧版平铺状态文件格式。
+任务启动时，源文件内容会快照到 `initial-prompt.txt`。后续 resume 只依赖 `.codex-run`，不回读原文件。
 
-## Completion Protocol
+## 恢复、查看状态、tail
 
-执行引擎不会因为自然语言“我做完了”就停下，而是要求 Codex 在真正完成时严格输出两行：
+```bash
+# 恢复最近一次任务
+codex-autoresearch session resume --last
 
-1. 基于 nonce 反转后的 done token
-2. `CONFIRMED: all tasks completed`
+# 查看最近任务状态
+codex-autoresearch session status --last
 
-只有完全匹配两行且没有第三行，任务才会被标记为 `completed`。这套协议是从旧 Bash 版本迁移下来的核心约束，目的是降低长任务误判完成的风险。
+# 按 session id 继续
+codex-autoresearch session resume <session-id>
+```
 
-## 兼容旧版 `codex-keep-running.sh`
+MCP 侧使用 `resume_session`、`get_session_status`、`tail_session`。
 
-老用法仍然保留：
+## Skills
+
+仓库自带的任务配方，遵循：
+
+```text
+skills/<name>/skill.yaml
+skills/<name>/prompt.md
+```
+
+列出可用 skills：
+
+```bash
+codex-autoresearch skill list
+```
+
+运行 skill：
+
+```bash
+codex-autoresearch skill run research --set topic=...
+```
+
+## Shell 薄包装 codex-keep-running.sh
 
 ```bash
 ./codex-keep-running.sh ./prompt.md
 cat ./prompt.md | ./codex-keep-running.sh -
 ```
 
-只是现在 shell 脚本已经退化成薄包装，内部会转调新的 Node CLI `legacy` 入口。
-
-旧环境变量依然可用：
+环境变量：
 
 | 变量 | 作用 |
 | --- | --- |
 | `WORKDIR` | 实际执行目录 |
-| `STATE_DIR` | 兼容层状态目录 |
+| `STATE_DIR` | 状态根目录 |
 | `INTERVAL` | 重试间隔 |
 | `MODEL` | 模型 |
 | `PROFILE` | profile |
@@ -748,89 +161,17 @@ cat ./prompt.md | ./codex-keep-running.sh -
 | `START_WITH_RESUME_IF_POSSIBLE` | 是否优先从历史状态恢复 |
 | `CONFIRM_TEXT` | 自定义完成确认文本 |
 
+## Completion Protocol
+
+执行引擎要求 Codex 在真正完成时严格输出两行：
+
+1. 基于 nonce 反转后的 done token
+2. `CONFIRMED: all tasks completed`
+
+只有完全匹配两行且没有第三行，任务才会被标记为 `completed`。
+
 ## 测试
 
 ```bash
 npm test
 ```
-
-测试覆盖：
-
-1. completion token 生成与识别
-2. session 恢复优先级
-3. skill manifest 解析与 prompt 渲染
-4. CLI 参数校验与傻瓜式入口
-5. 插件 manifest、marketplace 和插件 skills 路由约束
-6. fake `codex` 下的首轮启动、resume、`--last` 和兼容 wrapper
-7. MCP handler 的输入输出契约与错误分支
-
-### 手工真实测试目录约定
-
-为了避免真实联调时把测试素材和运行垃圾散落到仓库根目录，仓库约定把这类内容统一收口到：
-
-```text
-test/manual/
-├── README.md
-├── prompts/
-├── runtime/   # 忽略
-└── output/    # 忽略
-```
-
-约定说明：
-
-1. `test/manual/prompts/` 只放可复用、可提交的真实测试任务模板
-2. `test/manual/runtime/` 只放真实执行时的状态根目录，例如 `latest-job.txt`、`meta.json`、`runner.log`
-3. `test/manual/output/` 只放真实测试为了验证结果而生成的临时产物
-4. `runtime/` 和 `output/` 默认已加入忽略规则，不应提交到仓库
-
-例如验证旧版 `prompt.md -> codex-keep-running.sh` 兼容链路时，推荐这样执行：
-
-```bash
-WORKDIR=$(pwd) \
-STATE_DIR=$(pwd)/test/manual/runtime/legacy-readonly \
-./codex-keep-running.sh ./test/manual/prompts/legacy-readonly.md
-```
-
-如果你希望真实任务产出一个可检查的文件，也推荐把文件写到：
-
-```text
-test/manual/output/
-```
-
-而不是直接写到仓库根目录。
-
-## 开发说明
-
-仓库优先以 TypeScript/Node 作为主实现。Bash 只保留兼容职责，不再承载核心业务逻辑。
-
-### 内部分层
-
-这次重构后，源码默认按 3 层理解：
-
-1. `engine`
-说明 `completion protocol`、状态目录、Codex 进程调用和守护续跑
-
-2. `application`
-说明 direct task、skill、resume、status、chat intent route 这些业务用例怎么统一编排
-
-3. `transport / presenter`
-说明 CLI、MCP、legacy 如何解析输入、调用 application，并把结果格式化输出
-
-同时还额外拆出了两类可扩展模块：
-
-1. `routing`
-承接聊天意图判断、continue/new/conflict 策略，避免业务规则继续堆进 MCP server
-
-2. `skills`
-拆成 manifest、catalog、inputs、prompt 等子职责，避免 skill 协议扩展时全部挤在一个文件里
-
-后续如果新增入口，默认只新增 transport adapter，不应把业务规则直接塞回 CLI 或 MCP 文件。
-
-如果你要新增技能，请遵循：
-
-```text
-skills/<name>/skill.yaml
-skills/<name>/prompt.md
-```
-
-如果你要新增对外接口，请保持现有公共命令组和 MCP 工具名称不变，只做增量扩展。

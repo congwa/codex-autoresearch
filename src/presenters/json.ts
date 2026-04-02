@@ -44,7 +44,7 @@ export function isFailedPayload(payload: unknown): boolean {
  * 业务职责：把业务结果包装成 MCP 约定的 text content 响应，保证所有工具输出结构一致。
  *
  * 示例：
- * - `run_task`、`run_skill`、`start_from_current_chat` 最终都走这里，避免某个 tool 单独返回不同形状。
+ * - `run_task`、`run_skill`、`start_task_from_prompt_file` 最终都走这里，避免某个 tool 单独返回不同形状。
  */
 export function presentMcpJson(payload: unknown): TextContentResponse {
   return {

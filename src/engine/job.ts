@@ -47,6 +47,10 @@ export interface RunTaskOptions {
   skipGitRepoCheck?: boolean;
   startWithResumeIfPossible?: boolean;
   maxAttempts?: number;
+  promptSource?: "file" | "text" | "skill";
+  sourcePromptFile?: string;
+  /** 如果为 true，启动后台执行但立即返回 pending 状态，不阻塞等待完成。 */
+  fireAndForget?: boolean;
 }
 
 /**
@@ -111,8 +115,68 @@ const DEFAULT_CONFIRM_TEXT = "CONFIRMED: all tasks completed";
  * 业务职责：默认续跑提示负责把守护循环重新拉回“继续干活”状态，
  * 避免 resume 时模型重新总结、重启或等待额外确认。
  */
-const DEFAULT_RESUME_TEXT =
-  "You must respond to this message. Continue any unfinished user-requested work immediately from the current state. Do not restart. Do not summarize. Do not ask for confirmation. If all requested work is already complete, follow the completion protocol below.";
+const DEFAULT_RESUME_TEXT = [
+  "You must respond to this message. You are being auto-resumed by the perpetual task runner.",
+  "",
+  "CRITICAL INSTRUCTIONS:",
+  "- Continue any unfinished work IMMEDIATELY. Do not restart from scratch. Do not re-read files you already processed.",
+  "- First, check what output files already exist on disk (ls the output directory). Resume from where you left off — write the NEXT unfinished file.",
+  "- Do not summarize what was done before. Do not ask for confirmation. Do not output a plan.",
+  "- Your very first tool call should either check existing output OR start writing the next file.",
+  "- You are running autonomously with NO human in the loop. Never stop to ask questions. Never pause between steps.",
+  "- If all requested work is already complete, follow the completion protocol below."
+].join("\n");
+
+/**
+ * 业务职责：后台执行边界文本明确区分当前任务是 worker plane 而不是前台控制层，
+ * 防止长任务在执行过程中再次调用 codex-autoresearch 的 MCP 工具而触发宿主取消或递归编排。
+ */
+const WORKER_EXECUTION_BOUNDARY_TEXT = [
+  "Execution boundary for this task:",
+  "- You are running as the background worker for an existing codex-autoresearch task, not as the control plane.",
+  "- Do not call codex-autoresearch MCP tools from inside this task.",
+  "- Do not invoke run_task, start_task_from_prompt_file, run_skill, resume_session, get_session_status, tail_session, or list_skills.",
+  "- If you need prior task state, read local files under the current task state directory such as meta.json, last-message.txt, attempt snapshots, runner.log, or events.jsonl instead of calling MCP.",
+  "- Your job is to do the business work and produce the requested result, not to orchestrate codex-autoresearch itself."
+].join("\n");
+
+/**
+ * 业务职责：Worker 行为约束文本强制后台执行者尽早产出文件而不是无限调研，
+ * 防止 context 被调研内容耗尽后永动机 resume 又重新调研的死循环。
+ */
+const WORKER_BEHAVIOR_CONSTRAINTS_TEXT = [
+  "Worker behavior constraints (MANDATORY — violating these will cause the task to loop without progress):",
+  "",
+  "AUTONOMY — NEVER STOP TO ASK:",
+  "- You are running autonomously with NO human in the loop. There is nobody to answer your questions.",
+  "- NEVER stop to ask 'should I continue?', 'do you want me to proceed?', 'shall I write the next chapter?', or any similar question.",
+  "- NEVER output a summary and wait for confirmation. NEVER pause between steps.",
+  "- NEVER end your turn with a question or a 'next steps' list. If there is more work to do, DO IT NOW in this same turn.",
+  "- If you are unsure about a decision, make the best reasonable choice and keep going. Wrong content on disk is better than no content on disk.",
+  "- Your turn should only end when ALL work is complete (then use the completion protocol) or when you physically run out of context/output space.",
+  "",
+  "WRITE EARLY, WRITE OFTEN:",
+  "- You MUST start writing/creating the first output file within your first 2 tool calls. Do not spend more than 2 tool calls on research before producing output.",
+  "- Do not do exhaustive research before writing. If the task references a plan, spec, or existing document, trust it and write directly based on it.",
+  "- Write incrementally: finish one unit of work (one file, one section, one chapter), save it to disk immediately, then move to the next. Never accumulate all content in memory before writing.",
+  "- If you need to read a reference file, read it once and start writing immediately after. Do not re-read the same file or read adjacent files 'just in case'.",
+  "- Prefer writing good-enough content now over perfect content never. You can always be resumed to improve earlier output.",
+  "",
+  "TOOL FAILURES:",
+  "- If an MCP tool call fails or is cancelled, fall back to local tools (rg, sed, cat) immediately. Do not spend more than 1 tool call on the fallback."
+].join("\n");
+
+/**
+ * 业务职责：关键 MCP/tool 失败模式用于阻断“最后两行正确但业务并未完成”的假完成，
+ * 先覆盖当前已知最常见的宿主取消错误，后续可以继续扩展其它阻断型工具失败。
+ */
+const BLOCKING_MCP_TOOL_FAILURE_PATTERNS = [
+  {
+    pattern: /user cancelled MCP tool call/i,
+    code: "MCP_TOOL_CALL_CANCELLED",
+    retryable: true
+  }
+] as const;
 
 /**
  * 业务职责：规范化后的运行选项代表执行引擎内部真正依赖的稳定配置，
@@ -135,6 +199,9 @@ interface NormalizedRunOptions {
   skipGitRepoCheck: boolean;
   startWithResumeIfPossible: boolean;
   maxAttempts?: number;
+  promptSource?: "file" | "text" | "skill";
+  sourcePromptFile?: string;
+  fireAndForget: boolean;
 }
 
 /**
@@ -144,7 +211,7 @@ export function buildInitialPrompt(task: string, confirmText: string, rawNonce?:
   const protocol = createCompletionProtocol(confirmText, rawNonce);
   return {
     protocol,
-    prompt: `${task}\n\n${buildCompletionProtocolText(protocol)}\n`
+    prompt: `${task}\n\n${WORKER_EXECUTION_BOUNDARY_TEXT}\n\n${WORKER_BEHAVIOR_CONSTRAINTS_TEXT}\n\n${buildCompletionProtocolText(protocol)}\n`
   };
 }
 
@@ -152,7 +219,7 @@ export function buildInitialPrompt(task: string, confirmText: string, rawNonce?:
  * 业务职责：构建续跑提示，只提醒 Codex 继续推进当前任务而不重复灌入原始全文。
  */
 export function buildResumePrompt(protocol: ReturnType<typeof createCompletionProtocol>, resumeTextBase = DEFAULT_RESUME_TEXT): string {
-  return `${resumeTextBase} ${buildCompletionProtocolText(protocol)}\n`;
+  return `${resumeTextBase}\n\n${WORKER_EXECUTION_BOUNDARY_TEXT}\n\n${buildCompletionProtocolText(protocol)}\n`;
 }
 
 /**
@@ -175,7 +242,10 @@ export function normalizeRunOptions(options: RunTaskOptions): NormalizedRunOptio
     profile: options.profile,
     confirmText: options.confirmText ?? DEFAULT_CONFIRM_TEXT,
     resumeTextBase: options.resumeTextBase ?? DEFAULT_RESUME_TEXT,
-    maxAttempts: options.maxAttempts
+    maxAttempts: options.maxAttempts,
+    promptSource: options.promptSource,
+    sourcePromptFile: options.sourcePromptFile,
+    fireAndForget: options.fireAndForget ?? false
   };
 }
 
@@ -197,7 +267,9 @@ export async function runTask(options: RunTaskOptions): Promise<JobRunResult> {
     fullAuto: normalized.fullAuto,
     dangerouslyBypass: normalized.dangerouslyBypass,
     skipGitRepoCheck: normalized.skipGitRepoCheck,
-    startWithResumeIfPossible: normalized.startWithResumeIfPossible
+    startWithResumeIfPossible: normalized.startWithResumeIfPossible,
+    promptSource: normalized.promptSource,
+    sourcePromptFile: normalized.sourcePromptFile
   });
 
   if (!workdirIsValid) {
@@ -207,6 +279,14 @@ export async function runTask(options: RunTaskOptions): Promise<JobRunResult> {
 
   await writeFile(metadata.initialPromptFile, initialPrompt, "utf8");
   await writeFile(metadata.resumePromptFile, buildResumePrompt(protocol, normalized.resumeTextBase), "utf8");
+
+  if (normalized.fireAndForget) {
+    // 业务约束：fire-and-forget 模式下只初始化状态目录并在后台启动执行，不阻塞等待完成。
+    // 适用于 MCP 调用场景，调用方应通过 tail_session / get_session_status 轮询进度。
+    void runLoop(metadata, normalized.codexBin, normalized.intervalSeconds, normalized.maxAttempts);
+    return buildResult(metadata, "");
+  }
+
   return runLoop(metadata, normalized.codexBin, normalized.intervalSeconds, normalized.maxAttempts);
 }
 
@@ -290,7 +370,20 @@ export async function resolveResumeTarget(options: {
   sessionId?: string;
   useLast?: boolean;
 }): Promise<JobMetadata | undefined> {
-  const stateRoot = path.resolve(options.stateDir ?? path.resolve(process.cwd(), ".codex-run"));
+  const rawStateDir = options.stateDir ?? path.resolve(process.cwd(), ".codex-run");
+  let stateRoot = path.resolve(rawStateDir);
+
+  // 业务约束：调用方可能传入 job 目录而非 state root（例如 MCP run_task 返回的 stateDir 就是 job 目录）。
+  // 如果传入路径本身就是一个包含 meta.json 的 job 目录，直接尝试读取它。
+  const directMeta = await readJobMetadata(stateRoot);
+  if (directMeta) {
+    // 如果传入的恰好是某个 job 目录，且没有指定 jobId 或指定的 jobId 就是这个 job，直接返回。
+    if (!options.jobId || options.jobId === directMeta.jobId) {
+      return directMeta;
+    }
+    // 传入的是 job 目录但 jobId 不匹配，回退到其父目录作为 state root。
+    stateRoot = path.dirname(stateRoot);
+  }
 
   if (options.jobId) {
     // 业务约束：显式 job id 的优先级最高，因为它代表调用方已经明确指定了要附着哪条任务链。
@@ -337,6 +430,7 @@ async function runLoop(metadata: JobMetadata, codexBin: string, intervalSeconds:
     await writeJobMetadata(metadata);
 
     const prompt = nextMode === "initial" ? initialPrompt : resumePrompt;
+    const previousEventLog = await readEventLog(metadata.eventLogFile);
     let exitCode: number;
     try {
       exitCode = await runCodex(metadata, { codexBin, prompt, mode: nextMode });
@@ -352,8 +446,12 @@ async function runLoop(metadata: JobMetadata, codexBin: string, intervalSeconds:
 
     await snapshotAttempt(metadata, metadata.attemptCount);
     const lastMessage = await readLastMessage(metadata);
+    const blockingFailure = await detectBlockingFailureSince(metadata.eventLogFile, previousEventLog);
+    if (blockingFailure) {
+      metadata.lastError = blockingFailure;
+    }
     const protocol = createCompletionProtocol(metadata.confirmText, metadata.nonce.replace(/-/g, ""));
-    if (isCompletionMessage(lastMessage, protocol)) {
+    if (!blockingFailure && isCompletionMessage(lastMessage, protocol)) {
       metadata.status = "completed";
       await writeJobMetadata(metadata);
       return buildResult(metadata, lastMessage);
@@ -363,7 +461,7 @@ async function runLoop(metadata: JobMetadata, codexBin: string, intervalSeconds:
       // 业务约束：命中显式尝试上限时不判失败，而是停在 needs_resume 交给外部继续调度。
       metadata.status = "needs_resume";
       await writeJobMetadata(metadata);
-      return buildResult(metadata, lastMessage);
+      return buildResult(metadata, lastMessage, metadata.lastError);
     }
 
     metadata.status = "needs_resume";
@@ -445,4 +543,76 @@ async function createFailureMetadata(stateDir: string | undefined, workdir: stri
   await clearJobError(metadata);
   await recordJobFailure(metadata, toJobErrorInfo(error));
   return metadata;
+}
+
+/**
+ * 业务职责：读取事件日志当前内容，供单轮执行前后做增量对比，只分析本轮新增失败而不被历史噪音污染。
+ */
+async function readEventLog(eventLogFile: string): Promise<string> {
+  try {
+    return await readFile(eventLogFile, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * 业务职责：分析本轮新增事件里是否存在阻断型工具失败，一旦命中就禁止本轮以完成协议收尾。
+ */
+async function detectBlockingFailureSince(eventLogFile: string, previousContent: string): Promise<JobErrorInfo | undefined> {
+  const currentContent = await readEventLog(eventLogFile);
+  const newContent = currentContent.startsWith(previousContent) ? currentContent.slice(previousContent.length) : currentContent;
+  const eventLines = newContent
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  for (const line of eventLines) {
+    const event = parseEventLine(line);
+    const item = event?.item as
+      | {
+          type?: string;
+          status?: string;
+          error?: { message?: string } | null;
+        }
+      | undefined;
+
+    if (item?.type !== "mcp_tool_call" || item.status !== "failed") {
+      continue;
+    }
+
+    const errorMessage = item.error?.message?.trim();
+    if (!errorMessage) {
+      continue;
+    }
+
+    for (const definition of BLOCKING_MCP_TOOL_FAILURE_PATTERNS) {
+      if (definition.pattern.test(errorMessage)) {
+        return {
+          code: definition.code,
+          message: errorMessage,
+          retryable: definition.retryable
+        };
+      }
+    }
+
+    return {
+      code: "MCP_TOOL_CALL_FAILED",
+      message: errorMessage,
+      retryable: true
+    };
+  }
+
+  return undefined;
+}
+
+/**
+ * 业务职责：把事件日志单行安全解析成对象，避免某一条脏日志导致整轮阻断分析失效。
+ */
+function parseEventLine(line: string): Record<string, unknown> | undefined {
+  try {
+    return JSON.parse(line) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
 }

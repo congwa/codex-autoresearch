@@ -33,7 +33,7 @@ export function createCompletionProtocol(confirmText: string, rawNonce?: string)
  * 业务职责：把完成协议附加到用户任务或续跑提示中，让所有入口都遵循同一套收尾规则。
  */
 export function buildCompletionProtocolText(protocol: CompletionProtocol): string {
-  return `When using the completion protocol, reply with EXACTLY two lines and nothing else: line 1 = same groups in reverse order for nonce \`${protocol.nonce}\`; line 2 = \`${protocol.confirmText}\`.`;
+  return `When using the completion protocol, reply with EXACTLY two lines and nothing else: line 1 = same groups in reverse order for nonce \`${protocol.nonce}\`; line 2 = \`${protocol.confirmText}\`. Only use the completion protocol after all requested work is truly complete and no critical MCP/tool call failed, was cancelled, or still needs user action. If any critical tool call failed or was cancelled, do not emit the completion protocol; report the work as unfinished instead.`;
 }
 
 /**

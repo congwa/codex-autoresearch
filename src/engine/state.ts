@@ -39,6 +39,8 @@ export interface JobMetadata {
   skipGitRepoCheck: boolean;
   startWithResumeIfPossible: boolean;
   lastError?: JobErrorInfo;
+  promptSource?: "file" | "text" | "skill";
+  sourcePromptFile?: string;
   initialPromptFile: string;
   resumePromptFile: string;
   lastMessageFile: string;
@@ -93,6 +95,8 @@ export async function ensureJobMetadata(
     dangerouslyBypass: boolean;
     skipGitRepoCheck: boolean;
     startWithResumeIfPossible: boolean;
+    promptSource?: "file" | "text" | "skill";
+    sourcePromptFile?: string;
   }
 ): Promise<JobMetadata> {
   const layout = createStateLayout(options);
@@ -122,7 +126,9 @@ export async function ensureJobMetadata(
     fullAuto: options.fullAuto,
     dangerouslyBypass: options.dangerouslyBypass,
     skipGitRepoCheck: options.skipGitRepoCheck,
-    startWithResumeIfPossible: options.startWithResumeIfPossible
+    startWithResumeIfPossible: options.startWithResumeIfPossible,
+    promptSource: options.promptSource,
+    sourcePromptFile: options.sourcePromptFile
   };
 
   await writeJobMetadata(metadata);

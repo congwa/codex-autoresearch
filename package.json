@@ -20,8 +20,6 @@
   },
   "files": [
     "dist",
-    "plugins",
-    ".agents",
     "skills",
     "README.md",
     "codex-keep-running.sh"
