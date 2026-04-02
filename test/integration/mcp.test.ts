@@ -17,7 +17,7 @@ describe("mcp server contracts", () => {
   });
 
   /**
-   * 业务职责：验证 MCP server 至少暴露固定的六个对外工具，保证公共接口后续只增不改。
+   * 业务职责：验证 MCP server 至少暴露固定的对外工具集合，保证公共接口后续只增不改。
    */
   it("creates fixed tool set", () => {
     const server = createMcpServer();
@@ -66,6 +66,41 @@ describe("mcp server contracts", () => {
   });
 
   /**
+   * 业务职责：验证 `tail_session` 会把最近任务的最后消息、事件流尾部和运行日志尾部返回给当前聊天轮询显示。
+   */
+  it("returns tail snapshot for the latest task", async () => {
+    const workspace = await createFakeCodexWorkspace();
+    cleanup.push(workspace.root);
+    process.env.FAKE_CODEX_STATE_FILE = workspace.stateFile;
+    process.env.FAKE_CODEX_BEHAVIOR = "complete_immediately";
+    process.env.CODEX_BIN = workspace.fakeCodexPath;
+
+    const handlers = createMcpHandlers();
+    const stateDir = path.join(workspace.root, ".codex-run");
+    const runResponse = await handlers.runTaskTool({
+      task: "输出最近执行进度",
+      workdir: workspace.workdir,
+      stateDir
+    });
+    const runPayload = JSON.parse(runResponse.content[0].text);
+    await writeFile(path.join(runPayload.stateDir, "runner.log"), "line-1\nline-2\nline-3\n", "utf8");
+
+    const response = await handlers.tailSessionTool({
+      useLast: true,
+      stateDir,
+      tailLines: 2
+    });
+    const payload = JSON.parse(response.content[0].text);
+
+    expect(payload.jobId).toBe(runPayload.jobId);
+    expect(payload.sessionId).toBeTruthy();
+    expect(payload.lastMessage).toContain("CONFIRMED: all tasks completed");
+    expect(payload.attemptCount).toBeGreaterThan(0);
+    expect(payload.runnerLogTail).toEqual(["line-2", "line-3"]);
+    expect(payload.eventLogTail.at(-1)).toContain("\"session_id\"");
+  });
+
+  /**
    * 业务职责：验证缺失 skill 必填输入时会返回稳定错误结构，便于外部 agent 决定是否需要补参后重试。
    */
   it("fails on missing required skill input", async () => {
@@ -110,7 +145,7 @@ describe("mcp server contracts", () => {
   /**
    * 业务职责：验证聊天内“继续做”话术会优先路由到当前目录最近任务，保证插件固定话术能自动接续长任务链。
    */
-  it("routes continue chat intent to resume_session", async () => {
+  it("routes continue_current_directory_task to resume_session", async () => {
     const workspace = await createFakeCodexWorkspace();
     cleanup.push(workspace.root);
     process.env.FAKE_CODEX_STATE_FILE = workspace.stateFile;
@@ -126,7 +161,7 @@ describe("mcp server contracts", () => {
       stateDir
     });
 
-    const response = await handlers.routeChatIntentTool({
+    const response = await handlers.continueCurrentDirectoryTaskTool({
       chatIntent: "用 codex-autoresearch 继续做我们当前聊天里还没完成的事情。",
       chatSummary: "继续完善 README、插件文案和 MCP 测试",
       workdir: workspace.workdir,
@@ -143,7 +178,7 @@ describe("mcp server contracts", () => {
   /**
    * 业务职责：验证聊天窗 slash 入口会把最近聊天窗口交给统一路由，并在匹配旧链路时自动续跑当前目录最近任务。
    */
-  it("routes slash chat intent to resume_session", async () => {
+  it("routes start_from_current_chat slash intent to resume_session", async () => {
     const workspace = await createFakeCodexWorkspace();
     cleanup.push(workspace.root);
     process.env.FAKE_CODEX_STATE_FILE = workspace.stateFile;
@@ -159,9 +194,8 @@ describe("mcp server contracts", () => {
       stateDir
     });
 
-    const response = await handlers.routeChatIntentTool({
+    const response = await handlers.startFromCurrentChatTool({
       chatIntent: "/codex-autoresearch",
-      triggerMode: "slash",
       chatWindowTurns: [
         "我们已经把 CLI 安装说明补完了。",
         "还差 README 的聊天窗触发说明和 MCP 路由测试。",
@@ -180,7 +214,7 @@ describe("mcp server contracts", () => {
   /**
    * 业务职责：验证聊天内“处理当前需求”会在没有续跑信号时直接新建任务，避免固定话术误附着旧链路。
    */
-  it("routes new chat intent to run_task", async () => {
+  it("routes start_from_current_chat to run_task", async () => {
     const workspace = await createFakeCodexWorkspace();
     cleanup.push(workspace.root);
     process.env.FAKE_CODEX_STATE_FILE = workspace.stateFile;
@@ -188,7 +222,7 @@ describe("mcp server contracts", () => {
     process.env.CODEX_BIN = workspace.fakeCodexPath;
 
     const handlers = createMcpHandlers();
-    const response = await handlers.routeChatIntentTool({
+    const response = await handlers.startFromCurrentChatTool({
       chatIntent: "用 codex-autoresearch 处理我们当前聊天里正在讨论的需求。",
       chatSummary: "为当前仓库补 README 里的 MCP 用法说明和测试示例。",
       workdir: workspace.workdir,
@@ -204,7 +238,7 @@ describe("mcp server contracts", () => {
   /**
    * 业务职责：验证当前聊天里显式点名仓库 skill 时，MCP 路由会真正落到 `run_skill` 风格执行结果。
    */
-  it("routes explicit skill intent to run_skill", async () => {
+  it("routes run_skill_from_current_chat to run_skill", async () => {
     const workspace = await createFakeCodexWorkspace();
     cleanup.push(workspace.root);
     process.env.FAKE_CODEX_STATE_FILE = workspace.stateFile;
@@ -212,9 +246,8 @@ describe("mcp server contracts", () => {
     process.env.CODEX_BIN = workspace.fakeCodexPath;
 
     const handlers = createMcpHandlers();
-    const response = await handlers.routeChatIntentTool({
+    const response = await handlers.runSkillFromCurrentChatTool({
       chatIntent: "用 research skill 处理我们当前聊天刚才讨论的需求。",
-      triggerMode: "explicit_skill",
       skillName: "research",
       chatWindowTurns: [
         "我们要整理 codex-autoresearch 在聊天窗里怎么触发永动机。",
@@ -235,7 +268,7 @@ describe("mcp server contracts", () => {
   /**
    * 业务职责：验证聊天目标与当前目录最近任务冲突时会返回稳定确认态，避免插件静默续跑错误任务。
    */
-  it("returns explicit conflict for mismatched continue intent", async () => {
+  it("returns explicit conflict for mismatched continue_current_directory_task intent", async () => {
     const workspace = await createFakeCodexWorkspace();
     cleanup.push(workspace.root);
     process.env.FAKE_CODEX_STATE_FILE = workspace.stateFile;
@@ -251,7 +284,7 @@ describe("mcp server contracts", () => {
       stateDir
     });
 
-    const response = await handlers.routeChatIntentTool({
+    const response = await handlers.continueCurrentDirectoryTaskTool({
       chatIntent: "用 codex-autoresearch 继续做我们当前聊天里还没完成的事情。",
       chatSummary: "继续重写 README 的安装指南和插件市场说明。",
       workdir: workspace.workdir,

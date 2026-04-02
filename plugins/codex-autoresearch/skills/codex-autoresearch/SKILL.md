@@ -28,13 +28,12 @@ When the user triggers `/codex-autoresearch` in the current chat window:
 
 1. Read only the latest 8 turns from the current chat window.
 2. Summarize the concrete goal, constraints, and unfinished work from those turns.
-3. Call MCP tool `route_chat_intent`.
+3. Call MCP tool `start_from_current_chat`.
 4. Pass:
-   - `triggerMode: "slash"`
    - `chatIntent: "/codex-autoresearch"`
    - `chatWindowTurns`: the latest 8 turns
    - `chatSummary`: the one-paragraph summary you just produced
-5. Let `route_chat_intent` choose whether to:
+5. Let `start_from_current_chat` choose whether to:
    - resume the latest current-directory task
    - start a new direct task
    - ask for confirmation if the recent chat goal conflicts with the latest current-directory task

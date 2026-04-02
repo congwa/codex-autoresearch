@@ -14,6 +14,7 @@ import {
   listJobs,
   readJobMetadata,
   readLastMessage,
+  readTailLines,
   readLatestJobId,
   readSessionIdFile,
   recordJobFailure,
@@ -63,6 +64,18 @@ export interface ResumeSessionOptions {
 }
 
 /**
+ * 业务职责：会话尾读选项统一描述“附着到哪条任务链并取多少最近进度”，
+ * 让 MCP/CLI 可以安全地轮询当前长任务而不推进执行状态。
+ */
+export interface TailSessionOptions {
+  sessionId?: string;
+  jobId?: string;
+  useLast?: boolean;
+  stateDir?: string;
+  tailLines?: number;
+}
+
+/**
  * 业务职责：任务运行结果是所有入口对外暴露的统一业务回执，
  * 既要能表达完成/失败，也要能给调用方留下继续追踪同一任务的关键标识。
  */
@@ -74,6 +87,19 @@ export interface JobRunResult {
   lastMessage: string;
   lastMessageFile: string;
   error?: JobErrorInfo;
+}
+
+/**
+ * 业务职责：会话尾读结果把任务身份、最近业务输出和日志尾部组合成一个轮询快照，
+ * 供当前聊天持续展示“永动机任务刚执行到了哪里”。
+ */
+export interface SessionTailResult extends JobRunResult {
+  attemptCount: number;
+  createdAt: string;
+  updatedAt: string;
+  lastExitCode?: number;
+  runnerLogTail: string[];
+  eventLogTail: string[];
 }
 
 /**
@@ -224,6 +250,35 @@ export async function getSessionStatus(input: { stateDir?: string; jobId?: strin
   }
 
   return buildResult(metadata);
+}
+
+/**
+ * 业务职责：读取当前任务最近一段执行痕迹，供 MCP 在聊天内轮询展示 runner log、事件流和最后消息。
+ */
+export async function tailSession(input: TailSessionOptions): Promise<SessionTailResult> {
+  const metadata = await resolveResumeTarget({
+    stateDir: input.stateDir,
+    jobId: input.jobId,
+    sessionId: input.sessionId,
+    useLast: input.useLast
+  });
+
+  if (!metadata) {
+    throw new JobError("SESSION_NOT_FOUND", "No session tail could be found.", false);
+  }
+
+  const result = await buildResult(metadata);
+  const tailLines = input.tailLines ?? 50;
+
+  return {
+    ...result,
+    attemptCount: metadata.attemptCount,
+    createdAt: metadata.createdAt,
+    updatedAt: metadata.updatedAt,
+    lastExitCode: metadata.lastExitCode,
+    runnerLogTail: await readTailLines(metadata.runnerLogFile, tailLines),
+    eventLogTail: await readTailLines(metadata.eventLogFile, tailLines)
+  };
 }
 
 /**

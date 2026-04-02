@@ -26,14 +26,13 @@ Preferred route:
 1. Extract a concise `chatIntent` from the user’s latest message.
 2. Extract `chatWindowTurns` from the latest 8 turns of the current chat window.
 3. Extract a concrete `chatSummary` from those latest 8 turns.
-4. If the user explicitly named a repository skill such as `research` or `phased-validation`, pass `triggerMode: "explicit_skill"` and `skillName`.
-5. Otherwise pass `triggerMode: "natural"`.
-6. Call the MCP tool `route_chat_intent`.
-7. Let `route_chat_intent` choose whether this should:
+4. If the user explicitly named a repository skill such as `research` or `phased-validation`, call `run_skill_from_current_chat` and pass `skillName`.
+5. Otherwise call `start_from_current_chat`.
+6. Let the selected MCP tool choose whether this should:
    - resume the latest current-directory task
    - start a fresh task from the recent chat window
    - run the named repository skill
-8. If the tool returns `status: "needs_confirmation"`, explain the conflict and ask the user whether to continue the old task or start a new one.
+7. If the tool returns `status: "needs_confirmation"`, explain the conflict and ask the user whether to continue the old task or start a new one.
 
 ## Recommended Natural-Language Examples
 
@@ -54,12 +53,12 @@ When the user explicitly says a repository skill name in the current chat:
 1. Keep the current chat as the business context source.
 2. Keep the current working directory as the execution scope.
 3. Summarize the latest 8 turns.
-4. Pass the named repository skill to `route_chat_intent` instead of running a generic direct task.
-5. Let `route_chat_intent` infer the repository skill inputs from the recent chat window and start the long-running task from that recipe.
+4. Pass the named repository skill to `run_skill_from_current_chat` instead of running a generic direct task.
+5. Let `run_skill_from_current_chat` infer the repository skill inputs from the recent chat window and start the long-running task from that recipe.
 
 ## Continue Route
 
-If the user says anything equivalent to “用 codex-autoresearch 继续做”, “继续做”, “继续当前目录任务”, or “pick up where we left off”, do not create a new task immediately. First summarize the latest 8 turns from the current chat, then call `route_chat_intent`.
+If the user says anything equivalent to “用 codex-autoresearch 继续做”, “继续做”, “继续当前目录任务”, or “pick up where we left off”, do not create a new task immediately. First summarize the latest 8 turns from the current chat, then call `continue_current_directory_task`.
 
 The current chat decides what should continue. The current directory decides which codex-autoresearch task chain should be attached.
 

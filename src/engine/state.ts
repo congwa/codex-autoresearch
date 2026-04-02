@@ -269,6 +269,24 @@ export async function readLastMessage(metadata: JobMetadata): Promise<string> {
 }
 
 /**
+ * 业务职责：按行读取状态文件尾部内容，供 MCP/CLI 在当前聊天里轮询查看最近执行步骤，
+ * 避免外部调用方必须自己进入状态目录翻整份日志。
+ */
+export async function readTailLines(file: string, maxLines: number): Promise<string[]> {
+  try {
+    const content = await readFile(file, "utf8");
+    const normalizedLines = content
+      .split(/\r?\n/)
+      .map((line) => line.trimEnd())
+      .filter((line) => line.length > 0);
+    const safeMaxLines = Math.max(1, Math.trunc(maxLines));
+    return normalizedLines.slice(-safeMaxLines);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * 业务职责：验证工作目录是否真实存在，避免 CLI、MCP 或兼容层把任务误投到无效目录。
  */
 export async function assertWorkdirExists(workdir: string): Promise<void> {

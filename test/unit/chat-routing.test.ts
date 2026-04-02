@@ -72,7 +72,6 @@ describe("chat intent routing", () => {
     const result = await routeChatIntentWithPolicies(
       {
         chatIntent: "/codex-autoresearch",
-        triggerMode: "slash",
         chatWindowTurns: [
           "我们已经把 README 的 CLI 安装说明改好了。",
           "还差聊天窗触发说明和 MCP 路由测试。",
@@ -150,7 +149,6 @@ describe("chat intent routing", () => {
     const result = await routeChatIntentWithPolicies(
       {
         chatIntent: "用 research skill 处理我们当前聊天刚才讨论的需求。",
-        triggerMode: "explicit_skill",
         skillName: "research",
         chatWindowTurns: [
           "我们要把 codex-autoresearch 的聊天窗触发方案整理清楚。",

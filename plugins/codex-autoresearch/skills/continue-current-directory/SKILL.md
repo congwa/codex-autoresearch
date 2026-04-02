@@ -25,11 +25,10 @@ Preferred route:
 
 1. First summarize the latest 8 turns from the current chat window.
 2. Summarize the latest business goal and unfinished work from those turns.
-3. Call MCP tool `route_chat_intent` with:
+3. Call MCP tool `continue_current_directory_task` with:
    - a continue-style `chatIntent`
-   - `triggerMode: "natural"`
    - `chatWindowTurns`: the latest 8 turns
-4. Let `route_chat_intent` decide whether the latest current-directory task can be safely resumed.
+4. Let `continue_current_directory_task` decide whether the latest current-directory task can be safely resumed.
 5. If the tool returns `action: "conflict"`, ask the user whether to continue the old task or start a new one.
 
 This skill should treat the current chat as the meaning source and the current directory as the attachment scope.

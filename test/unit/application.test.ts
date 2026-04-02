@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const runTaskMock = vi.fn();
 const resumeSessionMock = vi.fn();
 const getSessionStatusMock = vi.fn();
+const tailSessionMock = vi.fn();
 const loadSkillMock = vi.fn();
 const resolveSkillInputsMock = vi.fn();
 const renderSkillPromptMock = vi.fn();
@@ -17,7 +18,8 @@ const routeChatIntentWithPoliciesMock = vi.fn();
 vi.mock("../../src/engine/job.js", () => ({
   runTask: runTaskMock,
   resumeSession: resumeSessionMock,
-  getSessionStatus: getSessionStatusMock
+  getSessionStatus: getSessionStatusMock,
+  tailSession: tailSessionMock
 }));
 
 vi.mock("../../src/skills/skill.js", () => ({
@@ -58,6 +60,19 @@ describe("application use cases", () => {
       status: "completed",
       lastMessage: "status",
       lastMessageFile: "/tmp/.codex-run/job-3/last-message.txt"
+    });
+    tailSessionMock.mockResolvedValue({
+      jobId: "job-4",
+      sessionId: "session-4",
+      stateDir: "/tmp/.codex-run/job-4",
+      status: "needs_resume",
+      lastMessage: "still working",
+      lastMessageFile: "/tmp/.codex-run/job-4/last-message.txt",
+      attemptCount: 2,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:10.000Z",
+      runnerLogTail: ["stderr line"],
+      eventLogTail: ["{\"session_id\":\"session-4\"}"]
     });
   });
 
@@ -136,6 +151,28 @@ describe("application use cases", () => {
 
     expect(result).toHaveLength(2);
     expect(toPublicSkillDefinitionMock).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * 业务职责：验证任务尾读用例只负责把聊天轮询请求转发给引擎，不在应用层重复拼日志逻辑。
+   */
+  it("delegates task tail lookup to the engine", async () => {
+    const { getTaskTail } = await import("../../src/application/use-cases.js");
+
+    const result = await getTaskTail({
+      useLast: true,
+      stateDir: "/repo/.codex-run",
+      tailLines: 20
+    });
+
+    expect(tailSessionMock).toHaveBeenCalledWith({
+      useLast: true,
+      stateDir: "/repo/.codex-run",
+      tailLines: 20,
+      sessionId: undefined,
+      jobId: undefined
+    });
+    expect(result.attemptCount).toBe(2);
   });
 
   /**

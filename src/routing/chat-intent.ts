@@ -315,8 +315,8 @@ export async function readPromptSafely(promptFile: string): Promise<string> {
 }
 
 /**
- * 业务职责：根据触发方式决定这次聊天路由应该按 slash、自然语言还是显式 skill 解释，
- * 让同一个 `route_chat_intent` tool 可以承接聊天窗里不同形态的入口。
+ * 业务职责：根据聊天事实推断这次请求更像 slash、自然语言还是显式 skill，
+ * 让多个当前聊天 MCP 入口最终都落到同一个内部路由判断，而不是要求外部调用方传内部分类参数。
  */
 export function resolveTriggerMode(command: RouteChatIntentCommand): ChatTriggerMode {
   if (command.triggerMode) {

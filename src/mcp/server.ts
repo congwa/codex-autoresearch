@@ -1,15 +1,25 @@
 /**
  * 业务职责：MCP 服务层把本仓库暴露成可被外部 agent 调用的任务执行服务，
- * 让 run task、run skill、resume 和状态查询都通过统一执行引擎完成。
+ * 让 run task、run skill、resume、当前聊天入口和状态查询都通过统一执行引擎完成。
  *
  * 为什么把 MCP 单独做成 transport 层：
  * - MCP 只是“怎么被外部调用”的协议，不应该承载核心业务编排。
- * - 这样 `route_chat_intent`、skill 执行、resume 规则都能和 CLI 共用同一套用例。
+ * - 这样当前聊天入口、skill 执行、resume 规则都能和 CLI 共用同一套用例。
  */
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { getTaskStatus, listAvailableSkills, resumeExistingTask, routeChatIntent, runDirectTask, runSkillTask } from "../application/use-cases.js";
+import {
+  continueCurrentDirectoryTask,
+  getTaskStatus,
+  getTaskTail,
+  listAvailableSkills,
+  resumeExistingTask,
+  runDirectTask,
+  runSkillTask,
+  runSkillFromCurrentChat,
+  startTaskFromCurrentChat
+} from "../application/use-cases.js";
 import { presentFailurePayload, presentMcpJson, type TextContentResponse } from "../presenters/json.js";
 
 /**
@@ -63,21 +73,40 @@ const StatusSchema = {
 };
 
 /**
- * 业务职责：聊天路由 tool schema 定义当前聊天意图、最近 8 轮摘要、显式 skill 指令和执行上下文的输入格式，
- * 让插件与外部 agent 能用稳定协议触发“继续 / 新建 / 运行 skill”的统一判断。
+ * 业务职责：tail tool schema 约束“查看最近执行步骤”所需的定位字段和尾读长度，
+ * 让当前聊天可以稳定轮询状态目录里的最新进度而不是误触发 resume。
  */
-const RouteChatIntentSchema = {
+const TailSessionSchema = {
+  sessionId: z.string().optional(),
+  jobId: z.string().optional(),
+  useLast: z.boolean().optional(),
+  stateDir: z.string().optional(),
+  tailLines: z.number().int().positive().max(200).optional()
+};
+
+/**
+ * 业务职责：当前聊天 tool schema 定义“把最近几轮聊天收敛成任务”的事实型输入，
+ * 让插件和外部 agent 只表达聊天上下文，不需要理解内部路由分类。
+ */
+const CurrentChatSchema = {
   chatIntent: z.string().min(1),
   chatSummary: z.string().optional(),
   chatWindowTurns: z.array(z.string().min(1)).optional(),
-  triggerMode: z.enum(["slash", "natural", "explicit_skill"]).optional(),
-  skillName: z.string().min(1).optional(),
   workdir: z.string().optional(),
   stateDir: z.string().optional(),
   model: z.string().optional(),
   profile: z.string().optional(),
   maxAttempts: z.number().int().positive().optional(),
   skillsRoot: z.string().optional()
+};
+
+/**
+ * 业务职责：当前聊天 skill tool schema 在普通聊天事实输入上补上显式 skill 名，
+ * 让外部 agent 用“选对 tool + 给 skillName”的方式表达按仓库配方执行。
+ */
+const CurrentChatSkillSchema = {
+  ...CurrentChatSchema,
+  skillName: z.string().min(1)
 };
 
 /**
@@ -89,12 +118,34 @@ export interface McpHandlers {
   runSkillTool: (input: { skillName: string; inputs?: Record<string, string>; workdir?: string; stateDir?: string; model?: string; interactive?: boolean; maxAttempts?: number }) => Promise<TextContentResponse>;
   resumeSessionTool: (input: { sessionId?: string; jobId?: string; useLast?: boolean; stateDir?: string; maxAttempts?: number }) => Promise<TextContentResponse>;
   getSessionStatusTool: (input: { sessionId?: string; jobId?: string; useLast?: boolean; stateDir?: string }) => Promise<TextContentResponse>;
-  routeChatIntentTool: (input: {
+  tailSessionTool: (input: { sessionId?: string; jobId?: string; useLast?: boolean; stateDir?: string; tailLines?: number }) => Promise<TextContentResponse>;
+  startFromCurrentChatTool: (input: {
     chatIntent: string;
     chatSummary?: string;
     chatWindowTurns?: string[];
-    triggerMode?: "slash" | "natural" | "explicit_skill";
-    skillName?: string;
+    workdir?: string;
+    stateDir?: string;
+    model?: string;
+    profile?: string;
+    maxAttempts?: number;
+    skillsRoot?: string;
+  }) => Promise<TextContentResponse>;
+  continueCurrentDirectoryTaskTool: (input: {
+    chatIntent: string;
+    chatSummary?: string;
+    chatWindowTurns?: string[];
+    workdir?: string;
+    stateDir?: string;
+    model?: string;
+    profile?: string;
+    maxAttempts?: number;
+    skillsRoot?: string;
+  }) => Promise<TextContentResponse>;
+  runSkillFromCurrentChatTool: (input: {
+    skillName: string;
+    chatIntent: string;
+    chatSummary?: string;
+    chatWindowTurns?: string[];
     workdir?: string;
     stateDir?: string;
     model?: string;
@@ -168,8 +219,27 @@ export function createMcpHandlers(): McpHandlers {
         )
       );
     },
-    async routeChatIntentTool(input) {
-      return handleTool(async () => presentMcpJson(await routeChatIntent(input)));
+    async tailSessionTool(input) {
+      return handleTool(async () =>
+        presentMcpJson(
+          await getTaskTail({
+            sessionId: input.sessionId,
+            jobId: input.jobId,
+            useLast: input.useLast,
+            stateDir: input.stateDir,
+            tailLines: input.tailLines
+          })
+        )
+      );
+    },
+    async startFromCurrentChatTool(input) {
+      return handleTool(async () => presentMcpJson(await startTaskFromCurrentChat(input)));
+    },
+    async continueCurrentDirectoryTaskTool(input) {
+      return handleTool(async () => presentMcpJson(await continueCurrentDirectoryTask(input)));
+    },
+    async runSkillFromCurrentChatTool(input) {
+      return handleTool(async () => presentMcpJson(await runSkillFromCurrentChat(input)));
     },
     async listSkillsTool() {
       return handleTool(async () => presentMcpJson(await listAvailableSkills()));
@@ -199,8 +269,18 @@ export function createMcpServer(): McpServer {
 
   server.tool("get_session_status", "读取已有任务状态。", StatusSchema, async (input) => handlers.getSessionStatusTool(input));
 
-  server.tool("route_chat_intent", "根据当前聊天意图自动判断继续当前目录任务、创建新任务或运行显式 skill。", RouteChatIntentSchema, async (input) =>
-    handlers.routeChatIntentTool(input)
+  server.tool("tail_session", "读取已有任务最近的执行步骤与日志尾部。", TailSessionSchema, async (input) => handlers.tailSessionTool(input));
+
+  server.tool("start_from_current_chat", "把当前聊天最近 8 轮整理成任务并在当前目录启动。", CurrentChatSchema, async (input) =>
+    handlers.startFromCurrentChatTool(input)
+  );
+
+  server.tool("continue_current_directory_task", "根据当前聊天目标继续当前目录最近任务，必要时返回确认冲突。", CurrentChatSchema, async (input) =>
+    handlers.continueCurrentDirectoryTaskTool(input)
+  );
+
+  server.tool("run_skill_from_current_chat", "把当前聊天最近 8 轮映射成指定仓库 skill 的输入并启动。", CurrentChatSkillSchema, async (input) =>
+    handlers.runSkillFromCurrentChatTool(input)
   );
 
   server.tool("list_skills", "列出仓库内可用 skills。", {}, async () => handlers.listSkillsTool());

@@ -38,8 +38,8 @@
 
 1. 当前聊天最近 8 轮是意图来源
 2. 当前目录是执行边界
-3. MCP tool `route_chat_intent` 是统一路由器
-4. 路由器会决定是继续旧任务、新建任务，还是运行显式 skill
+3. MCP tool `start_from_current_chat`、`continue_current_directory_task`、`run_skill_from_current_chat` 是正式聊天入口
+4. 这些入口会在内部复用同一套路由器，决定是继续旧任务、新建任务，还是运行显式 skill
 5. 如果当前聊天目标和当前目录最近任务冲突，会先要求确认
 
 推荐聊天内用法：
@@ -68,4 +68,4 @@
 
 1. 插件 skill 负责“怎么从当前聊天里触发”
 2. 仓库 skill 负责“触发后按什么任务配方执行”
-3. 两者通过 MCP `route_chat_intent` 串起来
+3. 两者通过当前聊天 MCP 工具串起来

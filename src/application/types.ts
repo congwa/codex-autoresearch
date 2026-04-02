@@ -6,7 +6,7 @@
  * - 没有统一类型时，CLI、MCP、legacy 会各自长出一套“差不多但不完全一样”的参数结构。
  * - 统一类型能把“业务命令是什么”和“传输层长什么样”分开，后面新增 HTTP/TUI 入口也更容易。
  */
-import type { JobRunResult, ResumeSessionOptions, RunTaskOptions } from "../engine/job.js";
+import type { JobRunResult, ResumeSessionOptions, RunTaskOptions, SessionTailResult, TailSessionOptions } from "../engine/job.js";
 
 /**
  * 业务职责：统一描述所有应用层命令可继承的运行上下文，
@@ -83,32 +83,65 @@ export interface GetTaskStatusCommand {
 }
 
 /**
- * 业务职责：聊天触发模式描述当前请求是从 slash、自然语言还是显式 skill 话术进入，
- * 让路由层能够针对“当前就在聊天窗里”的不同触发面保持一致又可解释的默认规则。
+ * 业务职责：会话尾读命令描述“只看最近进度、不推进执行”的查询请求，
+ * 让聊天内轮询展示与真正的 resume 行为保持清晰分离。
+ */
+export interface TailSessionCommand extends Pick<TailSessionOptions, "sessionId" | "jobId" | "useLast" | "stateDir" | "tailLines"> {}
+
+/**
+ * 业务职责：聊天触发模式描述内部路由推断出的聊天入口语义，
+ * 让应用层可以解释这次请求更像 slash、自然语言还是显式 skill，而不是要求外部调用方手填分类。
  *
  * 为什么要单独抽成类型：
  * - 同样都是当前聊天触发，`/codex-autoresearch` 更偏“自动整理并执行”，
  *   而显式 skill 更偏“我已经明确要走哪个配方”。
- * - 把触发面写进契约后，MCP、插件和测试都能稳定表达“这次为什么这样路由”。
+ * - 把触发面留在领域层后，MCP、插件和测试都能复用同一份推断结果，而不是各自维护分类参数。
  */
 export type ChatTriggerMode = "slash" | "natural" | "explicit_skill";
 
 /**
- * 业务职责：聊天路由命令描述“从当前聊天意图推导执行动作”的输入，
- * 让插件、MCP 和未来聊天入口统一复用同一份意图摘要结构。
+ * 业务职责：当前聊天上下文命令描述“当前聊天最近几轮里到底在说什么”，
+ * 让 MCP 专用工具先表达事实，再交给内部路由器决定该续跑、新建还是按 skill 配方执行。
  *
  * 示例：
  * - `chatIntent`: “用 codex-autoresearch 继续做我们当前聊天里还没完成的事情。”
  * - `chatSummary`: “继续完善 README 和 MCP 路由测试”
  * - `chatWindowTurns`: 当前聊天最近 8 轮的提炼结果，用来避免路由层误读更早历史。
  */
-export interface RouteChatIntentCommand extends CommandExecutionContext {
+export interface CurrentChatCommand extends CommandExecutionContext {
   chatIntent: string;
   chatSummary?: string;
   chatWindowTurns?: string[];
+  skillsRoot?: string;
+}
+
+/**
+ * 业务职责：从当前聊天启动任务命令对应“把最近几轮聊天收敛成任务并启动”的公开 MCP 场景，
+ * 适合 slash 入口和普通“把我们刚才聊的内容跑起来”话术。
+ */
+export interface StartFromCurrentChatCommand extends CurrentChatCommand {}
+
+/**
+ * 业务职责：继续当前目录任务命令对应“当前聊天说明要继续做同一件事”的公开 MCP 场景，
+ * 让调用方通过选 tool 表达意图，而不是手填内部路由模式。
+ */
+export interface ContinueCurrentDirectoryTaskCommand extends CurrentChatCommand {}
+
+/**
+ * 业务职责：从当前聊天运行 skill 命令对应“当前聊天明确点名某个仓库 skill”的公开 MCP 场景，
+ * 让调用方只提供 skill 名和聊天事实，补参与分类均由内部路由统一处理。
+ */
+export interface RunSkillFromCurrentChatCommand extends CurrentChatCommand {
+  skillName: string;
+}
+
+/**
+ * 业务职责：内部聊天路由命令描述“从当前聊天意图推导执行动作”的领域输入，
+ * 让专用 MCP 工具在进入路由器前能补上内部使用的 skillName 或已知触发面。
+ */
+export interface RouteChatIntentCommand extends CurrentChatCommand {
   triggerMode?: ChatTriggerMode;
   skillName?: string;
-  skillsRoot?: string;
 }
 
 /**
@@ -166,7 +199,7 @@ export type ChatIntentRouteResult = ChatIntentExecutionResult | ChatIntentConfli
  * 业务职责：应用层总结果类型为 presenter 和测试提供统一输入范围，
  * 避免不同传输层再各自维护零散的返回对象集合。
  */
-export type ApplicationResult = JobRunResult | ChatIntentRouteResult | PublicSkillDefinition[];
+export type ApplicationResult = JobRunResult | SessionTailResult | ChatIntentRouteResult | PublicSkillDefinition[];
 
 /**
  * 业务职责：把 direct task 命令映射到底层执行引擎需要的运行参数，供应用层用例统一转发。

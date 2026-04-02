@@ -89,17 +89,16 @@ describe("plugin manifest", () => {
 
     expect(slashSkill).toContain("/codex-autoresearch");
     expect(slashSkill).toContain("latest 8 turns");
-    expect(slashSkill).toContain('triggerMode: "slash"');
+    expect(slashSkill).toContain("start_from_current_chat");
     expect(slashSkill).toContain("Do not search for some other chat");
-    expect(currentChatSkill).toContain("route_chat_intent");
+    expect(currentChatSkill).toContain("start_from_current_chat");
+    expect(currentChatSkill).toContain("run_skill_from_current_chat");
     expect(currentChatSkill).toContain("Only summarize the latest 8 turns");
-    expect(currentChatSkill).toContain('triggerMode: "natural"');
-    expect(currentChatSkill).toContain('triggerMode: "explicit_skill"');
     expect(currentChatSkill).toContain("Do not pretend to know the current chat id.");
     expect(currentChatSkill).toContain("The current chat decides what should continue.");
     expect(currentChatSkill).toContain("If the latest task goal from the current chat is clearly different");
     expect(currentChatSkill).toContain("Shell commands are fallback only when MCP is unavailable.");
-    expect(continueSkill).toContain("route_chat_intent");
+    expect(continueSkill).toContain("continue_current_directory_task");
     expect(continueSkill).toContain("latest 8 turns");
     expect(continueSkill).toContain("Before resuming, summarize the latest 8 turns");
     expect(continueSkill).toContain("The current chat decides what should continue.");
@@ -117,7 +116,7 @@ describe("plugin manifest", () => {
     expect(readme).toContain("/codex-autoresearch");
     expect(readme).toContain("当前聊天最近 8 轮");
     expect(readme).toContain("用 research skill 处理我们当前聊天刚才讨论的需求");
-    expect(readme).toContain("route_chat_intent");
+    expect(readme).toContain("start_from_current_chat");
     expect(readme).toContain("当前版本仍然不能自动读取你眼前这个聊天的内部 id");
   });
 });

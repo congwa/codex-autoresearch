@@ -18,7 +18,7 @@
 | --- | --- | --- | --- |
 | 本地命令 | 你就在项目目录里，想直接跑永动机 | `npm install && npm run build`，然后直接运行本地 bin 或全局 bin | `codex-autoresearch "任务"` |
 | 全局命令 | 你希望任意项目目录里都能直接敲命令 | `npm install -g .` 或后续发布到 npm 后 `npm install -g codex-autoresearch` | `codex-autoresearch "任务"` |
-| MCP server | 你要把本项目暴露给外部 agent / 插件 / MCP client | 构建后运行 `codex-autoresearch mcp serve`，或通过插件内 `.mcp.json` 连接 | `run_task` / `run_skill` / `resume_session` / `route_chat_intent` |
+| MCP server | 你要把本项目暴露给外部 agent / 插件 / MCP client | 构建后运行 `codex-autoresearch mcp serve`，或通过插件内 `.mcp.json` 连接 | `run_task` / `run_skill` / `resume_session` / `get_session_status` / `tail_session` / `start_from_current_chat` / `continue_current_directory_task` / `run_skill_from_current_chat` |
 | 仓库自有 skill | 你希望把常用任务做成可复用配方 | 无需额外安装，构建后直接用 CLI 或 MCP 调用 `skills/<name>/skill.yaml + prompt.md` | `codex-autoresearch skill run ...` 或 MCP `run_skill` |
 | Codex 插件 | 你已经在 Codex 聊天窗里，希望直接在当前窗口触发 | 使用仓库内 `plugins/codex-autoresearch/` 和 `.agents/plugins/marketplace.json` 安装本地插件；`/codex-autoresearch` 目前要求 ChatGPT 登录的 Codex Desktop | `/codex-autoresearch` / 自然语言 / 显式 skill 名 |
 
@@ -26,6 +26,7 @@
 
 1. 如果你想使用 `/codex-autoresearch`，请优先确认当前 Codex Desktop 是 ChatGPT 登录态。
 2. 如果你当前是 API key 或 custom provider 模式，推荐直接使用自然语言、MCP 或 CLI，不要先假设 slash 可见。
+3. 如果你要在当前聊天里持续看执行进度，请在任务启动后轮询 MCP `tail_session`，不要误用 `resume_session` 做纯查看。
 
 最小本地安装：
 
@@ -63,6 +64,7 @@ codex-autoresearch --help
 | --- | --- |
 | 当前目录启动一个新永动机任务 | `codex-autoresearch "你的任务"` |
 | 当前目录继续最近任务 | `codex-autoresearch session resume --last` |
+| 在当前聊天里查看最近执行步骤 | MCP `tail_session` |
 | 运行仓库内置 skill | `codex-autoresearch skill run research --set topic=...` |
 | 启动 MCP server | `codex-autoresearch mcp serve` |
 | 打开交互入口 | `codex-autoresearch` |
@@ -81,6 +83,36 @@ codex-autoresearch --help
 用 codex-autoresearch 把我们刚才聊的需求跑成一个永动机任务。
 用 research skill 处理我们当前聊天刚才讨论的需求。
 ```
+
+### 在当前聊天里展示执行步骤
+
+如果你的目标是“在 Codex 当前聊天里一边触发永动机，一边看到它最新做到哪了”，推荐固定拆成两类 MCP 调用：
+
+1. 启动或续跑：
+   - `start_from_current_chat`
+   - `continue_current_directory_task`
+   - `run_skill_from_current_chat`
+   - `run_task`
+   - `run_skill`
+   - `resume_session`
+2. 纯查看最近进度：
+   - `tail_session`
+
+`tail_session` 不会推进执行，只会读取目标任务状态目录里的：
+
+1. `lastMessage`
+2. `runnerLogTail`
+3. `eventLogTail`
+4. `attemptCount / status / updatedAt`
+
+典型聊天内流程：
+
+```text
+先调用 start_from_current_chat，把我们刚才聊的需求跑成一个永动机任务；如果没有成功调用 MCP 就停止。
+然后每次只调用 tail_session(useLast=true, tailLines=30) 查看最近执行步骤，不要直接开始新的实现。
+```
+
+这样当前聊天就能把“任务已启动”和“最近几步执行痕迹”拆开显示，停电后也仍然可以继续用 `resume_session` 或 CLI `session resume --last` 恢复。
 
 ### 什么时候用哪一种
 
@@ -277,7 +309,9 @@ codex-autoresearch mcp serve
 3. `resume_session`
 4. `get_session_status`
 5. `list_skills`
-6. `route_chat_intent`
+6. `start_from_current_chat`
+7. `continue_current_directory_task`
+8. `run_skill_from_current_chat`
 
 最小调用示例：
 
@@ -414,14 +448,13 @@ MCP 客户端调用示例：
 }
 ```
 
-聊天窗内 slash / 自然语言 / 显式 skill 都会落到同一个 MCP 路由工具。最小示例：
+聊天窗内 slash / 自然语言 / 显式 skill 现在分别走当前聊天专用 MCP 工具。最小示例：
 
 ```json
 {
-  "tool": "route_chat_intent",
+  "tool": "start_from_current_chat",
   "arguments": {
     "chatIntent": "/codex-autoresearch",
-    "triggerMode": "slash",
     "chatWindowTurns": [
       "我们已经把 CLI 安装说明补好了。",
       "还差 README 的聊天窗触发说明和 MCP 路由测试。"
@@ -434,10 +467,12 @@ MCP 客户端调用示例：
 
 如果你是外部 agent，推荐优先用：
 
-1. `route_chat_intent`：聊天内自然语言路由，自动判断继续还是新建
-2. `run_task`：你已经有明确任务文本
-3. `run_skill`：你想复用仓库内 skill 配方
-4. `resume_session`：你已经明确要接到某条现有任务链
+1. `start_from_current_chat`：把当前聊天最近 8 轮收敛成任务并自动判断续跑还是新建
+2. `continue_current_directory_task`：你明确是在说“继续当前目录里这件事”
+3. `run_skill_from_current_chat`：你想按仓库 skill 配方消化当前聊天上下文
+4. `run_task`：你已经有明确任务文本
+5. `run_skill`：你已经有明确的 skill 输入
+6. `resume_session`：你已经明确要接到某条现有任务链
 
 ### 5. 在 Codex Desktop 中打开当前目录
 
@@ -499,8 +534,8 @@ marketplace 清单在：
 1. 插件不会直接读取你此刻正在看的 chat id
 2. 插件默认只提炼当前聊天最近 8 轮
 3. 当前聊天最近 8 轮提供目标、约束和未完事项；当前目录提供执行边界
-4. 插件会先把 slash、自然语言或显式 skill 名整理后交给 MCP tool `route_chat_intent`
-5. `route_chat_intent` 会自动判断应该走 `resume_session`、`run_task` 还是 `run_skill`
+4. 插件会根据用户意图选择 `start_from_current_chat`、`continue_current_directory_task` 或 `run_skill_from_current_chat`
+5. 这些 MCP 工具会在内部自动判断应该走 `resume_session`、`run_task` 还是 `run_skill`
 6. 如果当前聊天目标和当前目录最近 codex-autoresearch 任务明显冲突，会返回需要确认，而不是静默执行
 
 ### 已经在 `codex resume` 聊天里时怎么用
@@ -517,9 +552,9 @@ marketplace 清单在：
 
 1. 当前聊天最近 8 轮是意图来源，不是 thread id 来源
 2. 当前目录是执行边界
-3. `/codex-autoresearch` 默认会把当前聊天最近 8 轮整理成任务并交给 `route_chat_intent`
-4. 自然语言路径会把当前聊天最近 8 轮整理成 direct task 或 continue 意图
-5. 显式 skill 路径会把当前聊天最近 8 轮整理成 skill 输入，再交给 `route_chat_intent`
+3. `/codex-autoresearch` 默认会把当前聊天最近 8 轮整理后调用 `start_from_current_chat`
+4. 自然语言路径会在 `start_from_current_chat` 或 `continue_current_directory_task` 之间选择
+5. 显式 skill 路径会把当前聊天最近 8 轮整理成 skill 输入，再调用 `run_skill_from_current_chat`
 6. 如果判断到聊天目标和当前目录最近任务冲突，会先要求确认
 
 为什么现在比之前更简单：
@@ -602,8 +637,11 @@ marketplace 清单在：
 2. `run_skill`
 3. `resume_session`
 4. `get_session_status`
-5. `list_skills`
-6. `route_chat_intent`
+5. `tail_session`
+6. `list_skills`
+7. `start_from_current_chat`
+8. `continue_current_directory_task`
+9. `run_skill_from_current_chat`
 
 每个执行类 tool 都会返回：
 
@@ -613,7 +651,7 @@ marketplace 清单在：
 4. `status`
 5. `lastMessageFile`
 
-`route_chat_intent` 额外会返回：
+当前聊天类 tool 额外会返回：
 
 1. `action`，表示选择了 `resume_session`、`run_task`、`run_skill` 或 `conflict`
 2. `reason`，解释为什么这样路由
@@ -642,10 +680,10 @@ marketplace 清单在：
 更具体地说：
 
 1. 本地命令入口已经稳定
-2. MCP 工具集已经稳定，包含 `route_chat_intent`
+2. MCP 工具集已经稳定，包含当前聊天专用工具
 3. 仓库内 skill 已可通过 CLI 和 MCP 复用
-4. Codex 聊天内插件入口已经改成 MCP-first，并统一走 `route_chat_intent`
-5. 当前聊天窗里的 slash、自然语言、显式 skill 三条路径都收口到同一条执行链
+4. Codex 聊天内插件入口已经改成 MCP-first，并按场景调用当前聊天专用工具
+5. 当前聊天窗里的 slash、自然语言、显式 skill 三条路径仍然收口到同一条内部执行链
 6. 旧的 `codex-keep-running.sh` 仍然兼容，但不再是首选入口
 
 ## 状态目录
