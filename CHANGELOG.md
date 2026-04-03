@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `codex-autoresearch session resume --last` - 恢复最近任务
   - `codex-autoresearch session status --last` - 查看最近任务状态
 
+- **npm 发布**：支持 `npm install -g codex-autoresearch` 全局安装
+
 - **兼容层**：保留旧 `codex-keep-running.sh` 入口，内部转调新 CLI
 
 ### Changed

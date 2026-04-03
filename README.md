@@ -49,14 +49,20 @@
 
 ## 安装
 
+### 从 npm 全局安装（推荐）
+
 ```bash
-npm install
-npm run build
+npm install -g codex-autoresearch
+codex-autoresearch --help
 ```
 
-全局安装：
+### 从源码安装
 
 ```bash
+git clone https://github.com/congwa/codex-autoresearch.git
+cd codex-autoresearch
+npm install
+npm run build
 npm install -g .
 codex-autoresearch --help
 ```
