@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5-beta.0] - 2025-04-03
+
+### 核心亮点
+
+Codex CLI 参数升级：从 `--full-auto` 改为 `-a never -s workspace-write`，更精细的控制。
+
+### Added
+
+- **审批策略环境变量**
+  - `APPROVAL_POLICY` - 显式审批策略，等价于 `--ask-for-approval`
+  - `SANDBOX_MODE` - 显式沙箱模式，等价于 `--sandbox`
+
+### Changed
+
+- `USE_FULL_AUTO` 开启时落成 `-a never -s workspace-write` 而非 `--full-auto`
+- 默认执行命令从 `codex exec --full-auto` 改为 `codex exec -a never -s workspace-write`
+
+---
+
 ## [0.1.4] - 2025-04-03
 
 ### 核心亮点
