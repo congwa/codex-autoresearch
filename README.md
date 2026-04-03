@@ -299,3 +299,7 @@ npm link
 codex-autoresearch --help
 codex-autoresearch --version
 ```
+
+## 社区支持
+
+- [【Linux.do】](https://linux.do/t/topic/1810871)
