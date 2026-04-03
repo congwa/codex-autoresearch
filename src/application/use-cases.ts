@@ -1,18 +1,15 @@
 /**
- * 业务职责：应用层用例模块把 direct task、prompt file、skill、resume 和状态查询统一成稳定业务入口，
- * 让 CLI 和 MCP 只负责解析与展示，而不再直接编排底层引擎细节。
+ * 业务职责：应用层用例模块把 direct task、prompt file、resume 和状态查询统一成稳定业务入口，
+ * 让 CLI 只负责解析与展示，而不再直接编排底层引擎细节。
  */
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getSessionStatus, resumeSession, runTask, tailSession } from "../engine/job.js";
-import { listSkills, loadSkill, renderSkillPrompt, resolveSkillInputs, toPublicSkillDefinition } from "../skills/skill.js";
 import type {
   GetTaskStatusCommand,
-  PublicSkillDefinition,
   ResumeTaskCommand,
   RunDirectTaskCommand,
   RunPromptFileCommand,
-  RunSkillCommand,
   TailSessionCommand
 } from "./types.js";
 import { toRunTaskOptions } from "./types.js";
@@ -35,23 +32,8 @@ export async function runTaskFromPromptFile(command: RunPromptFileCommand): Prom
     task,
     promptSource: "file",
     sourcePromptFile: resolvedPath,
-    fireAndForget: command.fireAndForget
-  });
-}
-
-/**
- * 业务职责：统一承接"按 skill 配方执行任务"的业务入口。
- */
-export async function runSkillTask(command: RunSkillCommand): Promise<Awaited<ReturnType<typeof runTask>>> {
-  const definition = await loadSkill(command.skillName, path.resolve(command.skillsRoot ?? "skills"));
-  const values = await resolveSkillInputs(definition, command.inputs ?? {}, command.interactive ?? false);
-  return runDirectTask({
-    ...command,
-    task: renderSkillPrompt(definition.promptTemplate, values),
-    workdir: command.workdir ?? definition.manifest.defaultWorkdir,
-    model: command.model ?? definition.manifest.defaultModel,
-    promptSource: "skill",
-    fireAndForget: command.fireAndForget
+    fireAndForget: command.fireAndForget,
+    onStream: command.onStream
   });
 }
 
@@ -93,12 +75,4 @@ export async function getTaskTail(command: TailSessionCommand): Promise<Awaited<
     stateDir: command.stateDir,
     tailLines: command.tailLines
   });
-}
-
-/**
- * 业务职责：统一对外暴露仓库内可用 skill 清单。
- */
-export async function listAvailableSkills(skillsRoot = path.resolve("skills")): Promise<PublicSkillDefinition[]> {
-  const definitions = await listSkills(path.resolve(skillsRoot));
-  return definitions.map((definition) => toPublicSkillDefinition(definition));
 }

@@ -1,7 +1,7 @@
 {
   "name": "codex-autoresearch",
   "version": "0.1.2",
-  "description": "Unified Codex long-task runner with CLI, skills, and MCP entrypoints.",
+  "description": "Unified Codex long-task runner with CLI.",
   "type": "module",
   "repository": {
     "type": "git",
@@ -20,7 +20,6 @@
   },
   "files": [
     "dist",
-    "skills",
     "README.md",
     "codex-keep-running.sh"
   ],
@@ -32,7 +31,6 @@
   "keywords": [
     "codex",
     "cli",
-    "mcp",
     "automation",
     "research"
   ],
@@ -41,10 +39,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.17.4",
-    "commander": "^14.0.1",
-    "yaml": "^2.8.1",
-    "zod": "^4.1.11"
+    "commander": "^14.0.1"
   },
   "devDependencies": {
     "@types/node": "^24.6.0",

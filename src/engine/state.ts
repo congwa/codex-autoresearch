@@ -39,7 +39,7 @@ export interface JobMetadata {
   skipGitRepoCheck: boolean;
   startWithResumeIfPossible: boolean;
   lastError?: JobErrorInfo;
-  promptSource?: "file" | "text" | "skill";
+  promptSource?: "file" | "text";
   sourcePromptFile?: string;
   lastMessageFile: string;
   eventLogFile: string;
@@ -91,7 +91,7 @@ export async function ensureJobMetadata(
     dangerouslyBypass: boolean;
     skipGitRepoCheck: boolean;
     startWithResumeIfPossible: boolean;
-    promptSource?: "file" | "text" | "skill";
+    promptSource?: "file" | "text";
     sourcePromptFile?: string;
   }
 ): Promise<JobMetadata> {

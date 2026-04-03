@@ -16,6 +16,7 @@ export interface CodexRunOptions {
   codexBin: string;
   prompt: string;
   mode: "initial" | "resume";
+  onEvent?: (event: Record<string, unknown>) => void;
 }
 
 /**
@@ -81,6 +82,21 @@ export async function runCodex(metadata: JobMetadata, options: CodexRunOptions):
 
     child.stdout.pipe(stdoutStream);
     child.stderr.pipe(stderrStream);
+
+    if (options.onEvent) {
+      let buf = "";
+      child.stdout.on("data", (chunk: Buffer) => {
+        buf += chunk.toString();
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+        for (const line of lines) {
+          if (line.trim()) {
+            try { options.onEvent!(JSON.parse(line)); } catch { /* skip unparseable lines */ }
+          }
+        }
+      });
+    }
+
     child.on("error", (error) => {
       reject(new JobError("CODEX_SPAWN_FAILED", `Failed to start codex binary \`${options.codexBin}\`: ${error.message}`, false));
     });

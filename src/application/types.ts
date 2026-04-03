@@ -1,8 +1,9 @@
 /**
  * 业务职责：应用层类型模块定义统一的命令输入、业务结果和对外可展示字段，
- * 让 CLI、MCP 入口都围绕同一套语义边界协作，而不是各自拼装零散参数。
+ * 让 CLI 入口围绕同一套语义边界协作，而不是各自拼装零散参数。
  */
 import type { JobRunResult, ResumeSessionOptions, RunTaskOptions, SessionTailResult, TailSessionOptions } from "../engine/job.js";
+import type { StreamCallbacks } from "../presenters/streaming.js";
 
 /**
  * 业务职责：统一描述所有应用层命令可继承的运行上下文。
@@ -26,7 +27,7 @@ export interface CommandExecutionContext {
  */
 export interface RunDirectTaskCommand extends CommandExecutionContext {
   task: string;
-  promptSource?: "file" | "text" | "skill";
+  promptSource?: "file" | "text";
   sourcePromptFile?: string;
   exactStateDir?: string;
   jobId?: string;
@@ -34,6 +35,7 @@ export interface RunDirectTaskCommand extends CommandExecutionContext {
   resumeTextBase?: string;
   fireAndForget?: boolean;
   onProgress?: (status: { attempt: number; lastMessage: string }) => void;
+  onStream?: StreamCallbacks;
 }
 
 /**
@@ -42,17 +44,7 @@ export interface RunDirectTaskCommand extends CommandExecutionContext {
 export interface RunPromptFileCommand extends CommandExecutionContext {
   promptFile: string;
   fireAndForget?: boolean;
-}
-
-/**
- * 业务职责：Skill 命令描述"按仓库任务配方执行"的请求。
- */
-export interface RunSkillCommand extends CommandExecutionContext {
-  skillName: string;
-  inputs?: Record<string, string>;
-  interactive?: boolean;
-  skillsRoot?: string;
-  fireAndForget?: boolean;
+  onStream?: StreamCallbacks;
 }
 
 /**
@@ -76,21 +68,9 @@ export interface GetTaskStatusCommand {
 export interface TailSessionCommand extends Pick<TailSessionOptions, "sessionId" | "jobId" | "useLast" | "stateDir" | "tailLines"> {}
 
 /**
- * 业务职责：公开 skill 定义描述对外可见的技能元数据。
- */
-export interface PublicSkillDefinition {
-  name: string;
-  description: string;
-  inputs: Record<string, { description: string; required?: boolean; default?: string; prompt?: string }>;
-  defaultWorkdir?: string;
-  defaultModel?: string;
-  outputContract: string;
-}
-
-/**
  * 业务职责：应用层总结果类型为 presenter 和测试提供统一输入范围。
  */
-export type ApplicationResult = JobRunResult | SessionTailResult | PublicSkillDefinition[];
+export type ApplicationResult = JobRunResult | SessionTailResult;
 
 /**
  * 业务职责：把 direct task 命令映射到底层执行引擎需要的运行参数。
@@ -116,6 +96,13 @@ export function toRunTaskOptions(command: RunDirectTaskCommand): RunTaskOptions 
     promptSource: command.promptSource,
     sourcePromptFile: command.sourcePromptFile,
     fireAndForget: command.fireAndForget,
-    onProgress: command.onProgress
+    onProgress: command.onProgress,
+    onStream: command.onStream
+      ? {
+          onAttemptStart: command.onStream.onAttemptStart,
+          onAttemptEnd: command.onStream.onAttemptEnd,
+          onEvent: command.onStream.onEvent
+        }
+      : undefined
   };
 }

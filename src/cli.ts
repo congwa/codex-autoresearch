@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 业务职责：CLI 主入口把 direct task、prompt file、skills、session 恢复和 MCP 服务统一收口，
+ * 业务职责：CLI 主入口把 direct task、prompt file、session 恢复统一收口，
  * 让本仓库从单一 Bash 守护脚本升级为正式的 Node 命令行工具。
  */
 import { spawn } from "node:child_process";
@@ -11,20 +11,20 @@ import { pathToFileURL } from "node:url";
 import { Command, InvalidArgumentError } from "commander";
 import { once } from "node:events";
 import { normalizeCliExecutionContext } from "./application/context.js";
-import { getTaskStatus, listAvailableSkills, resumeExistingTask, runDirectTask, runSkillTask, runTaskFromPromptFile } from "./application/use-cases.js";
+import { getTaskStatus, resumeExistingTask, runDirectTask, runTaskFromPromptFile } from "./application/use-cases.js";
 import { ask } from "./engine/interactive.js";
-import { serveMcp } from "./mcp/server.js";
 import { isFailedPayload, presentFailurePayload, serializeJsonPayload } from "./presenters/json.js";
+import { createStreamingPresenter, type StreamCallbacks } from "./presenters/streaming.js";
 
 /**
- * 业务职责：创建 CLI 命令结构，固定对外公开的 `run`、`skill`、`session` 和 `mcp` 四组接口。
+ * 业务职责：创建 CLI 命令结构，固定对外公开的 `run`、`session` 两组接口。
  */
 export function createProgram(): Command {
   const program = new Command();
 
   program
     .name("codex-autoresearch")
-    .description("Unified Codex long-task runner with CLI, skills, and MCP.")
+    .description("Unified Codex long-task runner with CLI.")
     .argument("[task]", "直接执行的任务文本");
   program.option("--prompt-file <path>", "从 Markdown 文件读取任务");
   program.option("--state-dir <path>", "状态根目录，默认落到 workdir/.codex-run");
@@ -36,6 +36,7 @@ export function createProgram(): Command {
   program.option("--skip-git-repo-check", "跳过 git 仓库校验");
   program.option("--dangerously-bypass", "启用危险绕过模式");
   program.option("--no-full-auto", "关闭默认 --full-auto");
+  program.option("--no-stream", "关闭实时流式输出（默认 stderr 为 TTY 时启用）");
 
   // 业务职责：`run` 子命令服务于"我已经有一句明确任务文本或一个 prompt 文件"的主路径。
   const run = program.command("run").description("直接执行一条任务文本或 prompt 文件");
@@ -48,7 +49,8 @@ export function createProgram(): Command {
     if (promptFile) {
       const result = await runTaskFromPromptFile({
         ...rootOptions,
-        promptFile
+        promptFile,
+        onStream: maybeStreamCallbacks(program.opts())
       });
       printResult(result);
       return;
@@ -63,29 +65,7 @@ export function createProgram(): Command {
     const result = await runDirectTask({
       ...rootOptions,
       task: resolvedTask,
-    });
-
-    printResult(result);
-  });
-
-  // 业务职责：`skill` 命令组服务于"把常用任务沉淀成可复用配方"的场景。
-  const skill = program.command("skill").description("管理或运行仓库内 skills");
-  skill.command("list").description("列出全部 skills").action(async () => {
-    const definitions = await listAvailableSkills(path.resolve("skills"));
-    for (const definition of definitions) {
-      console.log(`${definition.name}\t${definition.description}`);
-    }
-  });
-
-  skill.command("run").argument("<skillName>").option("--set <key=value...>", "传入 skill 输入").description("执行指定 skill").action(async (skillName, options, command) => {
-    const rootOptions = normalizeCliExecutionContext(program.opts());
-    const inputMap = parseKeyValuePairs(options.set ?? []);
-    const result = await runSkillTask({
-      ...rootOptions,
-      skillName,
-      inputs: inputMap,
-      interactive: rootOptions.interactive,
-      skillsRoot: path.resolve("skills")
+      onStream: maybeStreamCallbacks(program.opts())
     });
 
     printResult(result);
@@ -116,12 +96,6 @@ export function createProgram(): Command {
       stateDir: rootOptions.stateDir
     });
     printResult(result);
-  });
-
-  // 业务职责：`mcp` 命令组把仓库能力暴露成标准 MCP 服务，供外部 agent 接入。
-  const mcp = program.command("mcp").description("启动仓库自有 MCP server");
-  mcp.command("serve").description("以 stdio 启动 MCP 服务").action(async () => {
-    await serveMcp();
   });
 
   // 业务职责：`app` 命令为"当前目录已经对了，只差打开 Desktop"提供快捷入口。
@@ -156,7 +130,8 @@ export function createProgram(): Command {
     if (promptFile) {
       const result = await runTaskFromPromptFile({
         ...rootOptions,
-        promptFile
+        promptFile,
+        onStream: maybeStreamCallbacks(program.opts())
       });
       printResult(result);
       return;
@@ -166,6 +141,7 @@ export function createProgram(): Command {
       const result = await runDirectTask({
         ...rootOptions,
         task,
+        onStream: maybeStreamCallbacks(program.opts())
       });
       printResult(result);
       return;
@@ -177,6 +153,7 @@ export function createProgram(): Command {
         const result = await runDirectTask({
           ...rootOptions,
           task: pipedTask,
+          onStream: maybeStreamCallbacks(program.opts())
         });
         printResult(result);
         return;
@@ -187,13 +164,7 @@ export function createProgram(): Command {
       return;
     }
 
-    const choice = await ask("请选择入口：run / skill / resume / app", "run");
-    if (choice === "skill") {
-      const skillName = await ask("请输入 skill 名称");
-      await program.parseAsync(["skill", "run", skillName], { from: "user" });
-      return;
-    }
-
+    const choice = await ask("请选择入口：run / resume / app", "run");
     if (choice === "resume") {
       await program.parseAsync(["session", "resume", "--last"], { from: "user" });
       return;
@@ -217,20 +188,6 @@ export function parsePositiveInt(value: string): number {
     throw new InvalidArgumentError(`Invalid positive integer: ${value}`);
   }
   return parsed;
-}
-
-export function parseKeyValuePairs(pairs: string[]): Record<string, string> {
-  return pairs.reduce<Record<string, string>>((result, pair) => {
-    const separatorIndex = pair.indexOf("=");
-    if (separatorIndex <= 0) {
-      throw new InvalidArgumentError(`Invalid key=value input: ${pair}`);
-    }
-
-    const key = pair.slice(0, separatorIndex);
-    const value = pair.slice(separatorIndex + 1);
-    result[key] = value;
-    return result;
-  }, {});
 }
 
 function parseEnvInt(value: string | undefined, fallback: number): number {
@@ -299,7 +256,8 @@ async function runLegacyTask(task: string, stateDir?: string) {
     dangerouslyBypass: process.env.DANGEROUSLY_BYPASS === "1",
     skipGitRepoCheck: process.env.SKIP_GIT_REPO_CHECK === "1",
     startWithResumeIfPossible: process.env.START_WITH_RESUME_IF_POSSIBLE !== "0",
-    confirmText: process.env.CONFIRM_TEXT
+    confirmText: process.env.CONFIRM_TEXT,
+    onStream: maybeStreamCallbacks({ stream: true })
   });
 }
 
@@ -312,4 +270,9 @@ function printResult(result: unknown): void {
   }
 
   console.log(serialized);
+}
+
+function maybeStreamCallbacks(opts: { stream?: boolean }): StreamCallbacks | undefined {
+  const enabled = opts.stream !== false && process.stderr.isTTY;
+  return enabled ? createStreamingPresenter(process.stderr) : undefined;
 }

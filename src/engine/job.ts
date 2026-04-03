@@ -47,12 +47,18 @@ export interface RunTaskOptions {
   skipGitRepoCheck?: boolean;
   startWithResumeIfPossible?: boolean;
   maxAttempts?: number;
-  promptSource?: "file" | "text" | "skill";
+  promptSource?: "file" | "text";
   sourcePromptFile?: string;
   /** 如果为 true，启动后台执行但立即返回 pending 状态，不阻塞等待完成。 */
   fireAndForget?: boolean;
   /** 每轮 codex 退出后调用的进度回调，用于 MCP 进度通知等场景。 */
   onProgress?: (status: { attempt: number; lastMessage: string }) => void;
+  /** 实时流式输出回调，用于 CLI 终端展示每轮执行进度。 */
+  onStream?: {
+    onAttemptStart?: (attempt: number) => void;
+    onAttemptEnd?: (attempt: number, exitCode: number, elapsed: number) => void;
+    onEvent?: (event: Record<string, unknown>) => void;
+  };
 }
 
 /**
@@ -160,10 +166,11 @@ interface NormalizedRunOptions {
   skipGitRepoCheck: boolean;
   startWithResumeIfPossible: boolean;
   maxAttempts?: number;
-  promptSource?: "file" | "text" | "skill";
+  promptSource?: "file" | "text";
   sourcePromptFile?: string;
   fireAndForget: boolean;
   onProgress?: (status: { attempt: number; lastMessage: string }) => void;
+  onStream?: RunTaskOptions["onStream"];
 }
 
 /**
@@ -208,7 +215,8 @@ export function normalizeRunOptions(options: RunTaskOptions): NormalizedRunOptio
     promptSource: options.promptSource,
     sourcePromptFile: options.sourcePromptFile,
     fireAndForget: options.fireAndForget ?? false,
-    onProgress: options.onProgress
+    onProgress: options.onProgress,
+    onStream: options.onStream
   };
 }
 
@@ -244,11 +252,11 @@ export async function runTask(options: RunTaskOptions): Promise<JobRunResult> {
 
   if (normalized.fireAndForget) {
     // 业务约束：fire-and-forget 模式下只初始化状态目录并在后台启动执行，不阻塞等待完成。
-    void runLoop(metadata, initialPrompt, resumePrompt, normalized.codexBin, normalized.intervalSeconds, normalized.maxAttempts, normalized.onProgress);
+    void runLoop(metadata, initialPrompt, resumePrompt, normalized.codexBin, normalized.intervalSeconds, normalized.maxAttempts, normalized.onProgress, normalized.onStream);
     return buildResult(metadata, "");
   }
 
-  return runLoop(metadata, initialPrompt, resumePrompt, normalized.codexBin, normalized.intervalSeconds, normalized.maxAttempts, normalized.onProgress);
+  return runLoop(metadata, initialPrompt, resumePrompt, normalized.codexBin, normalized.intervalSeconds, normalized.maxAttempts, normalized.onProgress, normalized.onStream);
 }
 
 /**
@@ -380,7 +388,7 @@ export async function resolveResumeTarget(options: {
 /**
  * 业务职责：执行主守护循环，持续推进同一任务直到收到严格完成协议或命中显式尝试上限。
  */
-async function runLoop(metadata: JobMetadata, initialPrompt: string, resumePrompt: string, codexBin: string, intervalSeconds: number, maxAttempts?: number, onProgress?: (status: { attempt: number; lastMessage: string }) => void): Promise<JobRunResult> {
+async function runLoop(metadata: JobMetadata, initialPrompt: string, resumePrompt: string, codexBin: string, intervalSeconds: number, maxAttempts?: number, onProgress?: (status: { attempt: number; lastMessage: string }) => void, onStream?: RunTaskOptions["onStream"]): Promise<JobRunResult> {
   const hasSessionId = Boolean(metadata.sessionId || (await readSessionIdFile(metadata.sessionIdFile)));
   let nextMode: "initial" | "resume" =
     metadata.attemptCount === 0 && !hasSessionId && !(await hasResumeArtifacts(metadata)) ? "initial" : "resume";
@@ -393,13 +401,16 @@ async function runLoop(metadata: JobMetadata, initialPrompt: string, resumePromp
 
     const prompt = nextMode === "initial" ? initialPrompt : resumePrompt;
     const previousEventLog = await readEventLog(metadata.eventLogFile);
+    const attemptStartTime = Date.now();
+    onStream?.onAttemptStart?.(metadata.attemptCount);
     let exitCode: number;
     try {
-      exitCode = await runCodex(metadata, { codexBin, prompt, mode: nextMode });
+      exitCode = await runCodex(metadata, { codexBin, prompt, mode: nextMode, onEvent: onStream?.onEvent });
     } catch (error) {
       return failJob(metadata, error);
     }
     metadata.lastExitCode = exitCode;
+    onStream?.onAttemptEnd?.(metadata.attemptCount, exitCode, Date.now() - attemptStartTime);
 
     const discoveredSessionId = await discoverSessionId(metadata.eventLogFile);
     if (discoveredSessionId) {

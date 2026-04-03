@@ -9,7 +9,10 @@
       "Bash(codex --help 2>&1 | head -30)",
       "Bash(codex exec --help 2>&1 | head -40)",
       "Bash(codex exec --help 2>&1 | grep -i profile)",
-      "Bash(codex exec --profile default \"echo hello\" 2>&1 | head -5)"
+      "Bash(codex exec --profile default \"echo hello\" 2>&1 | head -5)",
+      "Bash(npm install 2>&1 | tail -5)",
+      "Bash(git -C /Users/wang/code/my/codex-autoresearch show HEAD:src/mcp/server.ts)",
+      "Bash(find /Users/wang/code/my/codex-autoresearch -path \"*/codex-run/*/events.jsonl\" 2>/dev/null | head -1; find /Users/wang/code/my/codex-autoresearch -name \"*.jsonl\" 2>/dev/null | head -3)"
     ]
   }
 }
