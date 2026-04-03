@@ -33,15 +33,30 @@ export function createCompletionProtocol(confirmText: string, rawNonce?: string)
  * 业务职责：把完成协议附加到用户任务或续跑提示中，让所有入口都遵循同一套收尾规则。
  */
 export function buildCompletionProtocolText(protocol: CompletionProtocol): string {
-  return `When using the completion protocol, reply with EXACTLY two lines and nothing else: line 1 = same groups in reverse order for nonce \`${protocol.nonce}\`; line 2 = \`${protocol.confirmText}\`. Only use the completion protocol after all requested work is truly complete and no critical MCP/tool call failed, was cancelled, or still needs user action. If any critical tool call failed or was cancelled, do not emit the completion protocol; report the work as unfinished instead.`;
+  return `When using the completion protocol, the FINAL two lines of your reply must be: line 1 = same groups in reverse order for nonce \`${protocol.nonce}\`; line 2 = \`${protocol.confirmText}\`. You may include a structured completion report before those final two lines when the task requires it. Only use the completion protocol after all requested work is truly complete and no critical MCP/tool call failed, was cancelled, or still needs user action. If any critical tool call failed or was cancelled, do not emit the completion protocol; report the work as unfinished instead.`;
 }
 
 /**
- * 业务职责：严格校验最后一条消息是否匹配完成口令，防止 assistant 输出多余说明时被误判为完成。
+ * 业务职责：严格校验 assistant 最终回复的收尾两行是否匹配完成口令，
+ * 既允许前面带结构化完成报告，也能继续拦住自然语言误报完成。
  */
 export function isCompletionMessage(message: string, protocol: CompletionProtocol): boolean {
-  const normalized = message.replace(/\r/g, "");
-  const [line1 = "", line2 = "", line3 = ""] = normalized.split("\n");
+  const normalizedLines = message
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.trimEnd());
+  let index = normalizedLines.length - 1;
 
-  return line1 === protocol.doneToken && line2 === protocol.confirmText && line3 === "";
+  while (index >= 0 && normalizedLines[index] === "") {
+    index -= 1;
+  }
+
+  if (index < 1) {
+    return false;
+  }
+
+  const line2 = normalizedLines[index];
+  const line1 = normalizedLines[index - 1];
+
+  return line1 === protocol.doneToken && line2 === protocol.confirmText;
 }

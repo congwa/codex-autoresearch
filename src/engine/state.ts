@@ -7,6 +7,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { CompletionProtocol } from "./completion.js";
 import type { JobErrorInfo } from "./error.js";
+import type { CompletionCheckResult, GoalExtractionMode, PlanDriftInfo } from "./planning.js";
 
 /**
  * 业务职责：任务状态枚举统一表达长任务在守护链路中的生命周期阶段，
@@ -39,12 +40,21 @@ export interface JobMetadata {
   skipGitRepoCheck: boolean;
   startWithResumeIfPossible: boolean;
   lastError?: JobErrorInfo;
+  lastCompletionCheck?: CompletionCheckResult;
+  lastPlanDrift?: PlanDriftInfo;
   promptSource?: "file" | "text";
   sourcePromptFile?: string;
+  goalExtractionMode?: GoalExtractionMode;
+  goalContractHash?: string;
+  lastObservedPlanHash?: string;
   lastMessageFile: string;
   eventLogFile: string;
   runnerLogFile: string;
   sessionIdFile: string;
+  goalContractFile: string;
+  goalManifestFile: string;
+  workingPlanFile: string;
+  planRevisionsFile: string;
   metaFile: string;
 }
 
@@ -61,7 +71,7 @@ export interface StateLayoutOptions {
 /**
  * 业务职责：统一计算任务目录结构，保证不同入口对状态文件的命名和落盘位置完全一致。
  */
-export function createStateLayout(options: StateLayoutOptions = {}): Pick<JobMetadata, "jobId" | "stateDir" | "stateRoot" | "lastMessageFile" | "eventLogFile" | "runnerLogFile" | "sessionIdFile" | "metaFile"> {
+export function createStateLayout(options: StateLayoutOptions = {}): Pick<JobMetadata, "jobId" | "stateDir" | "stateRoot" | "lastMessageFile" | "eventLogFile" | "runnerLogFile" | "sessionIdFile" | "goalContractFile" | "goalManifestFile" | "workingPlanFile" | "planRevisionsFile" | "metaFile"> {
   const stateRoot = path.resolve(options.stateRoot ?? ".codex-run");
   const jobId = options.jobId ?? randomUUID();
   const stateDir = options.exactStateDir ? path.resolve(options.exactStateDir) : path.join(stateRoot, jobId);
@@ -74,6 +84,10 @@ export function createStateLayout(options: StateLayoutOptions = {}): Pick<JobMet
     eventLogFile: path.join(stateDir, "events.jsonl"),
     runnerLogFile: path.join(stateDir, "runner.log"),
     sessionIdFile: path.join(stateDir, "session-id.txt"),
+    goalContractFile: path.join(stateDir, "goal-contract.md"),
+    goalManifestFile: path.join(stateDir, "goal-manifest.json"),
+    workingPlanFile: path.join(stateDir, "working-plan.latest.md"),
+    planRevisionsFile: path.join(stateDir, "plan-revisions.jsonl"),
     metaFile: path.join(stateDir, "meta.json")
   };
 }
@@ -136,11 +150,15 @@ export async function ensureJobMetadata(
  * 业务职责：读取任务元信息，用于 resume、状态查询和 MCP 对外返回稳定的任务身份标识。
  */
 export async function readJobMetadata(stateDir: string): Promise<JobMetadata | undefined> {
-  const metaFile = path.join(stateDir, "meta.json");
+  const layout = createStateLayout({ exactStateDir: stateDir });
 
   try {
-    const content = await readFile(metaFile, "utf8");
+    const content = await readFile(layout.metaFile, "utf8");
     const metadata = JSON.parse(content) as JobMetadata;
+    metadata.goalContractFile = metadata.goalContractFile ?? layout.goalContractFile;
+    metadata.goalManifestFile = metadata.goalManifestFile ?? layout.goalManifestFile;
+    metadata.workingPlanFile = metadata.workingPlanFile ?? layout.workingPlanFile;
+    metadata.planRevisionsFile = metadata.planRevisionsFile ?? layout.planRevisionsFile;
     // 业务约束：session id 允许从 session-id.txt 补回，避免 meta 与事件流不同步时导致恢复失败。
     metadata.sessionId = metadata.sessionId ?? (await readSessionIdFile(path.join(stateDir, "session-id.txt")));
     return metadata;

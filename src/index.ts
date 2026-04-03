@@ -8,5 +8,6 @@ export * from "./application/use-cases.js";
 export * from "./engine/completion.js";
 export * from "./engine/error.js";
 export * from "./engine/job.js";
+export * from "./engine/planning.js";
 export * from "./engine/state.js";
 export * from "./presenters/json.js";

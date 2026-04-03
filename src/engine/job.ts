@@ -8,6 +8,13 @@ import { buildCompletionProtocolText, createCompletionProtocol, isCompletionMess
 import { discoverSessionId, runCodex } from "./codex.js";
 import { JobError, toJobErrorInfo, type JobErrorInfo } from "./error.js";
 import {
+  buildCompletionFailurePrompt,
+  buildPlanningPromptAppendix,
+  ensurePlanningArtifacts,
+  refreshPlanningArtifacts,
+  validateCompletionReport
+} from "./planning.js";
+import {
   clearJobError,
   ensureJobMetadata,
   findJobBySessionId,
@@ -49,6 +56,8 @@ export interface RunTaskOptions {
   maxAttempts?: number;
   promptSource?: "file" | "text";
   sourcePromptFile?: string;
+  sourcePromptContent?: string;
+  frozenGoalsText?: string;
   /** 如果为 true，启动后台执行但立即返回 pending 状态，不阻塞等待完成。 */
   fireAndForget?: boolean;
   /** 每轮 codex 退出后调用的进度回调，用于 MCP 进度通知等场景。 */
@@ -99,6 +108,8 @@ export interface JobRunResult {
   lastMessage: string;
   lastMessageFile: string;
   error?: JobErrorInfo;
+  lastCompletionCheck?: JobMetadata["lastCompletionCheck"];
+  lastPlanDrift?: JobMetadata["lastPlanDrift"];
 }
 
 /**
@@ -168,6 +179,8 @@ interface NormalizedRunOptions {
   maxAttempts?: number;
   promptSource?: "file" | "text";
   sourcePromptFile?: string;
+  sourcePromptContent?: string;
+  frozenGoalsText?: string;
   fireAndForget: boolean;
   onProgress?: (status: { attempt: number; lastMessage: string }) => void;
   onStream?: RunTaskOptions["onStream"];
@@ -214,6 +227,8 @@ export function normalizeRunOptions(options: RunTaskOptions): NormalizedRunOptio
     maxAttempts: options.maxAttempts,
     promptSource: options.promptSource,
     sourcePromptFile: options.sourcePromptFile,
+    sourcePromptContent: options.sourcePromptContent,
+    frozenGoalsText: options.frozenGoalsText,
     fireAndForget: options.fireAndForget ?? false,
     onProgress: options.onProgress,
     onStream: options.onStream
@@ -242,6 +257,8 @@ export async function runTask(options: RunTaskOptions): Promise<JobRunResult> {
     promptSource: normalized.promptSource,
     sourcePromptFile: normalized.sourcePromptFile
   });
+
+  await ensurePlanningArtifacts(metadata, normalized.sourcePromptContent, normalized.frozenGoalsText);
 
   if (!workdirIsValid) {
     // 业务约束：工作目录无效时也必须先创建失败态记录，保证外部系统仍能追踪这次失败请求。
@@ -282,6 +299,8 @@ export async function resumeSession(options: ResumeSessionOptions): Promise<JobR
 
   const protocol = createCompletionProtocol(metadata.confirmText, metadata.nonce.replace(/-/g, ""));
   const resumePrompt = buildResumePrompt(protocol);
+
+  await ensurePlanningArtifacts(metadata);
 
   return runLoop(metadata, "", resumePrompt, options.codexBin ?? process.env.CODEX_BIN ?? "codex", options.intervalSeconds ?? 3, options.maxAttempts);
 }
@@ -400,11 +419,15 @@ async function runLoop(metadata: JobMetadata, initialPrompt: string, resumePromp
     metadata.lastError = undefined;
     await writeJobMetadata(metadata);
 
-    const prompt = nextMode === "initial"
-      ? initialPrompt
-      : lastHadBlockingFailure
-        ? resumePrompt + "\n注意：之前轮次中出现的工具调用错误（如 MCP 调用被取消）已经不再影响本轮。如果你已完成所有任务，请正常使用 completion protocol 结束。不要因为之前的错误而拒绝完成。\n"
-        : resumePrompt;
+    const planningSnapshot = await refreshPlanningArtifacts(metadata);
+    const prompt = buildAttemptPrompt({
+      mode: nextMode,
+      initialPrompt,
+      resumePrompt,
+      planningAppendix: buildPlanningPromptAppendix(planningSnapshot),
+      completionFailurePrompt: buildCompletionFailurePrompt(metadata.lastCompletionCheck),
+      lastHadBlockingFailure
+    });
     const previousEventLog = await readEventLog(metadata.eventLogFile);
     const attemptStartTime = Date.now();
     onStream?.onAttemptStart?.(metadata.attemptCount);
@@ -428,12 +451,16 @@ async function runLoop(metadata: JobMetadata, initialPrompt: string, resumePromp
     const blockingFailure = await detectBlockingFailureSince(metadata.eventLogFile, previousEventLog);
     if (blockingFailure) {
       metadata.lastError = blockingFailure;
+      metadata.lastCompletionCheck = undefined;
     }
     const protocol = createCompletionProtocol(metadata.confirmText, metadata.nonce.replace(/-/g, ""));
     if (!blockingFailure && isCompletionMessage(lastMessage, protocol)) {
-      metadata.status = "completed";
-      await writeJobMetadata(metadata);
-      return buildResult(metadata, lastMessage);
+      metadata.lastCompletionCheck = await validateCompletionReport(metadata, lastMessage);
+      if (metadata.lastCompletionCheck.status !== "failed") {
+        metadata.status = "completed";
+        await writeJobMetadata(metadata);
+        return buildResult(metadata, lastMessage);
+      }
     }
 
     if (maxAttempts && metadata.attemptCount >= maxAttempts) {
@@ -455,6 +482,37 @@ async function runLoop(metadata: JobMetadata, initialPrompt: string, resumePromp
 }
 
 /**
+ * 业务职责：把续跑轮次需要的冻结目标、失败缺口和阻断提醒统一拼成 prompt，
+ * 避免不同分支各自拼字符串导致规划型任务的约束上下文不一致。
+ */
+function buildAttemptPrompt(input: {
+  mode: "initial" | "resume";
+  initialPrompt: string;
+  resumePrompt: string;
+  planningAppendix: string;
+  completionFailurePrompt: string;
+  lastHadBlockingFailure: boolean;
+}): string {
+  const sections: string[] = [];
+
+  sections.push(input.mode === "initial" ? input.initialPrompt.trimEnd() : input.resumePrompt.trimEnd());
+
+  if (input.planningAppendix) {
+    sections.push(input.planningAppendix);
+  }
+
+  if (input.lastHadBlockingFailure) {
+    sections.push("注意：之前轮次中出现的工具调用错误（如 MCP 调用被取消）已经不再影响本轮。如果你已完成所有任务，请正常使用 completion protocol 结束。不要因为之前的错误而拒绝完成。");
+  }
+
+  if (input.completionFailurePrompt) {
+    sections.push(input.completionFailurePrompt);
+  }
+
+  return `${sections.filter(Boolean).join("\n\n")}\n`;
+}
+
+/**
  * 业务职责：判断当前任务目录里是否已有可续跑痕迹，避免重启后无脑新建会话导致上下文漂移。
  */
 async function hasResumeArtifacts(metadata: JobMetadata): Promise<boolean> {
@@ -472,7 +530,9 @@ async function buildResult(metadata: JobMetadata, lastMessage?: string, error?: 
     status: metadata.status,
     lastMessage: lastMessage ?? (await readLastMessage(metadata)),
     lastMessageFile: metadata.lastMessageFile,
-    error: error ?? metadata.lastError
+    error: error ?? metadata.lastError,
+    lastCompletionCheck: metadata.lastCompletionCheck,
+    lastPlanDrift: metadata.lastPlanDrift
   };
 }
 

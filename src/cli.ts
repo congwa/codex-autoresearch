@@ -6,6 +6,7 @@
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { Command, InvalidArgumentError } from "commander";
@@ -16,6 +17,16 @@ import { ask } from "./engine/interactive.js";
 import { isFailedPayload, presentFailurePayload, serializeJsonPayload } from "./presenters/json.js";
 import { createStreamingPresenter, type StreamCallbacks } from "./presenters/streaming.js";
 
+const require = createRequire(import.meta.url);
+const packageJson = require("../package.json") as { version: string };
+
+/**
+ * 业务职责：统一暴露 CLI 版本号来源，确保 `--version`、测试校验和后续发布流程都围绕同一份 package 版本工作。
+ */
+export function getCliVersion(): string {
+  return packageJson.version;
+}
+
 /**
  * 业务职责：创建 CLI 命令结构，固定对外公开的 `run`、`session` 两组接口。
  */
@@ -25,8 +36,10 @@ export function createProgram(): Command {
   program
     .name("codex-autoresearch")
     .description("Unified Codex long-task runner with CLI.")
+    .version(getCliVersion())
     .argument("[task]", "直接执行的任务文本");
   program.option("--prompt-file <path>", "从 Markdown 文件读取任务");
+  program.option("--frozen-goals-text <text>", "显式传入不可变冻结目标文本，仅对 --prompt-file 生效");
   program.option("--state-dir <path>", "状态根目录，默认落到 workdir/.codex-run");
   program.option("--workdir <path>", "Codex 实际执行目录", process.cwd());
   program.option("--model <model>", "透传给 codex exec -m");
@@ -42,18 +55,25 @@ export function createProgram(): Command {
   const run = program.command("run").description("直接执行一条任务文本或 prompt 文件");
   run.argument("[task]");
   run.option("--prompt-file <path>", "从 Markdown 文件读取任务");
+  run.option("--frozen-goals-text <text>", "显式传入不可变冻结目标文本，仅对 --prompt-file 生效");
   run.action(async (task, localOptions) => {
     const rootOptions = normalizeCliExecutionContext(program.opts());
     const promptFile = localOptions.promptFile ?? program.opts().promptFile;
+    const frozenGoalsText = localOptions.frozenGoalsText ?? program.opts().frozenGoalsText;
 
     if (promptFile) {
       const result = await runTaskFromPromptFile({
         ...rootOptions,
         promptFile,
+        frozenGoalsText,
         onStream: maybeStreamCallbacks(program.opts())
       });
       printResult(result);
       return;
+    }
+
+    if (frozenGoalsText) {
+      throw new InvalidArgumentError("--frozen-goals-text 只能和 --prompt-file 一起使用。");
     }
 
     const resolvedTask = task ?? (rootOptions.interactive ? await ask("请输入任务") : "");
@@ -126,15 +146,21 @@ export function createProgram(): Command {
   program.action(async (task) => {
     const rootOptions = normalizeCliExecutionContext(program.opts());
     const promptFile = program.opts().promptFile;
+    const frozenGoalsText = program.opts().frozenGoalsText;
 
     if (promptFile) {
       const result = await runTaskFromPromptFile({
         ...rootOptions,
         promptFile,
+        frozenGoalsText,
         onStream: maybeStreamCallbacks(program.opts())
       });
       printResult(result);
       return;
+    }
+
+    if (frozenGoalsText) {
+      throw new InvalidArgumentError("--frozen-goals-text 只能和 --prompt-file 一起使用。");
     }
 
     if (task) {

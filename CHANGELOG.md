@@ -28,5 +28,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - 移除 MCP、Skills 相关代码，简化为纯 CLI 工具
-- 执行引擎下沉为共享层，支持多入口复用
+- 执行引擎下沉为共享层，支持多入口复用/
 - 状态目录统一为 `.codex-run/<job-id>/`

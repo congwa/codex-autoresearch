@@ -33,6 +33,8 @@ export async function runTaskFromPromptFile(command: RunPromptFileCommand): Prom
     task,
     promptSource: "file",
     sourcePromptFile: resolvedPath,
+    sourcePromptContent: rawContent,
+    frozenGoalsText: command.frozenGoalsText,
     fireAndForget: command.fireAndForget,
     onStream: command.onStream
   });

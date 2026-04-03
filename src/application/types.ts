@@ -29,6 +29,8 @@ export interface RunDirectTaskCommand extends CommandExecutionContext {
   task: string;
   promptSource?: "file" | "text";
   sourcePromptFile?: string;
+  sourcePromptContent?: string;
+  frozenGoalsText?: string;
   exactStateDir?: string;
   jobId?: string;
   confirmText?: string;
@@ -43,6 +45,7 @@ export interface RunDirectTaskCommand extends CommandExecutionContext {
  */
 export interface RunPromptFileCommand extends CommandExecutionContext {
   promptFile: string;
+  frozenGoalsText?: string;
   fireAndForget?: boolean;
   onStream?: StreamCallbacks;
 }
@@ -95,6 +98,8 @@ export function toRunTaskOptions(command: RunDirectTaskCommand): RunTaskOptions 
     maxAttempts: command.maxAttempts,
     promptSource: command.promptSource,
     sourcePromptFile: command.sourcePromptFile,
+    sourcePromptContent: command.sourcePromptContent,
+    frozenGoalsText: command.frozenGoalsText,
     fireAndForget: command.fireAndForget,
     onProgress: command.onProgress,
     onStream: command.onStream
