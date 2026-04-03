@@ -1,6 +1,6 @@
 {
   "name": "codex-autoresearch",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Unified Codex long-task runner with CLI.",
   "type": "module",
   "repository": {
