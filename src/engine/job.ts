@@ -392,6 +392,7 @@ async function runLoop(metadata: JobMetadata, initialPrompt: string, resumePromp
   const hasSessionId = Boolean(metadata.sessionId || (await readSessionIdFile(metadata.sessionIdFile)));
   let nextMode: "initial" | "resume" =
     metadata.attemptCount === 0 && !hasSessionId && !(await hasResumeArtifacts(metadata)) ? "initial" : "resume";
+  let lastHadBlockingFailure = false;
 
   while (true) {
     metadata.status = "running";
@@ -399,7 +400,11 @@ async function runLoop(metadata: JobMetadata, initialPrompt: string, resumePromp
     metadata.lastError = undefined;
     await writeJobMetadata(metadata);
 
-    const prompt = nextMode === "initial" ? initialPrompt : resumePrompt;
+    const prompt = nextMode === "initial"
+      ? initialPrompt
+      : lastHadBlockingFailure
+        ? resumePrompt + "\n注意：之前轮次中出现的工具调用错误（如 MCP 调用被取消）已经不再影响本轮。如果你已完成所有任务，请正常使用 completion protocol 结束。不要因为之前的错误而拒绝完成。\n"
+        : resumePrompt;
     const previousEventLog = await readEventLog(metadata.eventLogFile);
     const attemptStartTime = Date.now();
     onStream?.onAttemptStart?.(metadata.attemptCount);
@@ -437,6 +442,10 @@ async function runLoop(metadata: JobMetadata, initialPrompt: string, resumePromp
       await writeJobMetadata(metadata);
       return buildResult(metadata, lastMessage, metadata.lastError);
     }
+
+    // 业务约束：上一轮存在 blocking failure 时，下一轮 resume prompt 需要显式清除 AI 上下文中
+    // "不能使用 completion protocol"的印象，否则 AI 会基于自己的历史回复无限拒绝完成。
+    lastHadBlockingFailure = Boolean(blockingFailure);
 
     metadata.status = "needs_resume";
     await writeJobMetadata(metadata);

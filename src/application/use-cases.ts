@@ -26,7 +26,8 @@ export async function runDirectTask(command: RunDirectTaskCommand): Promise<Awai
  */
 export async function runTaskFromPromptFile(command: RunPromptFileCommand): Promise<Awaited<ReturnType<typeof runTask>>> {
   const resolvedPath = path.resolve(command.promptFile);
-  const task = await readFile(resolvedPath, "utf8");
+  const rawContent = await readFile(resolvedPath, "utf8");
+  const task = `以下是来自 prompt 文件 \`${resolvedPath}\` 的任务指令，请严格按照其中的要求执行（而不是修改这份文件本身）：\n\n---\n\n${rawContent}`;
   return runDirectTask({
     ...command,
     task,
